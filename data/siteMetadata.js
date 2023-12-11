@@ -2,7 +2,7 @@
 const siteMetadata = {
   title: 'Software Engineering Blog',
   author: 'Amit Bisht',
-  headerTitle: 'BishtBits&Bytes',
+  headerTitle: 'Amit.Brews.Code',
   description: 'Preachings of an average tech bro',
   language: 'en-us',
   theme: 'system', // system, dark or light
