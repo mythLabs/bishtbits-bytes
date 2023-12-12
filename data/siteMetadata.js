@@ -9,7 +9,7 @@ const siteMetadata = {
   siteUrl: 'https://tailwind-nextjs-starter-blog.vercel.app',
   siteRepo: 'https://github.com/mythLabs/bishtbits-bytes',
   siteLogo: '/static/images/logo.png',
-  socialBanner: '/static/images/twitter-card.png',
+  socialBanner: '/static/images/logo.png',
   mastodon: 'https://mastodon.social/@mastodonuser',
   email: 'amitbisht744@gmail.com',
   linkedin: 'https://linkedin.com/in/amit-bisht744',
