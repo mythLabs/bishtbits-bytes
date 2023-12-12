@@ -7,12 +7,12 @@ const siteMetadata = {
   language: 'en-us',
   theme: 'system', // system, dark or light
   siteUrl: 'https://tailwind-nextjs-starter-blog.vercel.app',
-  siteRepo: 'https://github.com/timlrx/tailwind-nextjs-starter-blog',
+  siteRepo: 'https://github.com/mythLabs/bishtbits-bytes',
   siteLogo: '/static/images/logo.png',
   socialBanner: '/static/images/twitter-card.png',
   mastodon: 'https://mastodon.social/@mastodonuser',
   email: 'amitbisht744@gmail.com',
-  linkedin: 'https://www.linkedin.com',
+  linkedin: 'https://linkedin.com/in/amit-bisht744',
   locale: 'en-US',
   analytics: {
     // If you want to use an analytics provider you have to add it to the

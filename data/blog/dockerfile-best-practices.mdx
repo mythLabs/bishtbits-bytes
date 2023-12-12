@@ -1,0 +1,183 @@
+---
+title: 'Dockerfile Best Practices'
+date: '2023-12-12'
+lastmod: '2023-12-12'
+tags: ['docker', 'dockerfile', 'bestPractices']
+draft: false
+summary: 'In this exploration, delve into Dockerfile best practices—essential guidelines that empower you to build containers that are not only robust but also optimized for performance and security. These best practices will pave the way for a smoother and more effective containerized development process.'
+images: ['/static/images/twitter-card.png']
+---
+
+## Introduction
+
+In the fast-paced realm of modern software development, containerization has emerged as a pivotal technology, revolutionizing the way applications are deployed, managed, and scaled. At the forefront of this containerization revolution stands Docker, a platform that has become synonymous with efficient and consistent application packaging.
+
+At the heart of Docker's magic is the Dockerfile – a script that defines a blueprint for building Docker containers. While Dockerfiles empower developers to encapsulate their applications and dependencies into portable, reproducible units, mastering the art of crafting them efficiently is essential for realizing the full potential of Docker.
+
+In this article, we will delve into the process of 'How to actually write a good Dockerfile' by initially creating a suboptimal Dockerfile and progressively refining it using different techniques.
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+## Setup
+
+We will be using a small [Node.js hello world API](https://github.com/mythLabs/blog-content/tree/main/dockerfile-best-practices/project) built using Express, which serves data from a JSON file. There are multiple Dockerfiles, each incrementally better than the previous one, numbered from 01 to 05.
+
+## Creating a working setup
+
+The first step of a task is to complete it error-free, and optimization comes in subsequent steps.
+
+```dockerfile:01.dockerfile
+From node:latest
+copy . .
+RUN npm install
+CMD [ "node", "app.js" ]
+```
+
+> let me explain
+
+`FROM`: It defines the base image that we will use. Make sure to always use officially supported Docker images.
+
+`COPY`: As the name suggests, this command is used to copy files.
+
+`RUN`: This is used to execute any provided instruction.
+
+`CMD`: This is used to provide default execution arguments to the container.
+
+At this point, if we build our Docker image with the command `docker build -t 01-project -f 05.dockerfile .` and run it using the `command docker run -p 3000:3000 01-project`, we will be able to get a response from our API at `http://localhost:3000`. It means that the Dockerfile is working, and the basic functionality is completed. However, in reality, we are far from being finished. Making something work and making it work correctly are two very different things. Let's improve this Dockerfile further.
+
+![Docker image build output](/static/images/blog/dockerfile-best-practices/00.jpg)
+
+# Improvements
+
+## Make it small
+
+```
+From node:latest
+```
+
+We have used the latest tag of the Node image. In the Docker world, "latest" is unversioned. In a few weeks, "latest" could have a different Node version, packages, etc., and it could potentially break our Docker image. Therefore, we should use a specific tag like "node:18," which won't be updated in the future.
+
+If we check the Docker image that we created, we will see something astonishing.
+
+![Docker image size large](/static/images/blog/dockerfile-best-practices/01.png)
+
+The size is 1.11 GB, which is significant and considered an anti-pattern.
+
+The official Node.js registry on [Docker Hub](https://hub.docker.com/_/node/) provides us with multiple flavors of Node, and we can choose any one of them.
+
+Let's update our base to `node:18.17.1-alpine`. 
+
+```
+From node:18.17.1-alpine
+```
+
+After building, what do we see?
+
+![Docker image size large](/static/images/blog/dockerfile-best-practices/02.jpg)
+
+Its size is just 181 MB, which is impressive. Now, that's a huge improvement.
+
+## Make it build fast
+
+Docker images use a layered file system, where each command run through the Dockerfile creates its own layer. A layer is only created if there is a change in it, and older, less frequently changed layers are reused, resulting in faster build times and smaller image sizes.
+
+```dockerfile:02.dockerfile
+  From node:18.17.1-alpine
+  copy . .
+  RUN npm install
+  CMD [ "node", "app.js" ]
+```
+In the 02.dockerfile, we copy everything from the source directly and install packages again, which is a time-consuming process. However, in real-world scenarios, we often change our source code more frequently than we add or update packages. So, the question arises: why install packages again and again?
+
+So, we will copy only the package*.json files and install packages earlier in the build step. The higher the frequency of changes, the lower it should be in the build step.
+
+```diff-js:dockerfile:03.dockerfile
+  From node:18.17.1-alpine
++ WORKDIR /app
++ COPY package.json package-lock.json .
++ RUN NODE_ENV=production && npm ci --production && npm cache clean --force
+  COPY . .
++ COPY data.json  .
+  CMD [ "node", "app.js" ]
+```
+> let me explain
+
+`WORKDIR`: This sets the working directory for future commands, essentially changing the current directory.
+
+Now, we are copying package files and installing packages. If there is no change in the package file, then the `COPY` and `RUN` layers that were already created during the previous image build will be reused. The same principle applies to any other layer – only if there is a change will the execution proceed. If there is a change in any layer, it will get executed, and all layers below it will also get executed. Thus, the higher the frequency of change, the lower it should be in the build step.
+
+Additionally, we can use `npm ci with the production tag` and `cache clean` to keep only the required dependencies in `node_modules`, making it as small as possible.
+
+We place `data.json` lowest as data has the highest possibility of change. On its change, only the last two layers will get executed, making the build in that scenario blazingly fast, as seen in the image below.
+
+![Docker image size large](/static/images/blog/dockerfile-best-practices/03.jpg)
+
+## Make it secure
+
+Docker containers run as the root user by default, posing security risks if the container becomes compromised. Running as root can also be problematic when sharing folders between the host and the Docker container. To mitigate these issues, we will create a new user and use it for running the container.
+
+```diff-js:dockerfile:04.dockerfile
+  From node:18.17.1-alpine
++ RUN addgroup -S user && adduser -S user -G user
+  WORKDIR /app
++ COPY --chown=user:user . /app
+  COPY package.json package-lock.json .
+  RUN NODE_ENV=production && npm ci --production && npm cache clean --force
+  COPY . .
+  COPY data.json  .
++ USER user
++ EXPOSE 3000
+  CMD [ "node", "app.js" ]
+```
+
+> let me explain
+
+We use Linux `addgroup` and `adduser` commands to create a new user. Afterward, we transfer the ownership of our working directory to this new user and switch to it using the `USER` command.
+
+Additionally, the `EXPOSE` keyword is used to document the intended port to be used. While it has no functional impact on container networking, it serves as documentation for users or developers.
+
+## Include only what is absolutely necessary in the Docker image.
+
+So, now that we have a good Dockerfile, let's inspect our app folder inside it. We can use the command `docker run -it 04.project sh`. This command runs the container in interactive mode, providing us with a shell terminal.
+
+and what do we see !!
+
+![Docker image size large](/static/images/blog/dockerfile-best-practices/04.jpg)
+
+There are extra files inside the /app folder that are not required to run it. If only there was a way to tell Docker to skip some files. Enter `.dockerignore`. It's a [file](https://github.com/mythLabs/blog-content/blob/main/dockerfile-best-practices/project/.dockerignore) that can be created in the root, similar to `.gitignore`, and we can add all the files that need to be skipped. After building the image with it, we can observe that only the necessary files are placed.
+
+![Docker image size large](/static/images/blog/dockerfile-best-practices/05.jpg)
+
+## Exit gracefully
+
+When you run a Docker container, the process with PID 1 is whatever you set as your ENTRYPOINT (or, if you don't have one, then it's either your shell or another program, depending on the format of your CMD).
+
+Now, unlike other processes, PID 1 has a unique responsibility, which is to reap zombie processes. So, on Docker termination, the parent process is mainly the shell.
+
+When we run 'docker stop', Docker sends a configurable signal to the entrypoint of your application, with SIGTERM being the default. However, the process that got started with Docker does not transfer the signal anywhere. Thus, we need a small parent process before whatever we want to run with Docker.
+
+We can use an init container here, for example, [tini](https://github.com/krallin/tini).
+
+```diff-js:dockerfile:05.dockerfile
+  From node:18.17.1-alpine
++ RUN apk add --no-cache tini
+  RUN addgroup -S user && adduser -S user -G user
+  WORKDIR /app
+  COPY --chown=user:user . /app
+  COPY package.json package-lock.json .
+  RUN NODE_ENV=production && npm ci --production && npm cache clean --force
+  COPY . .
+  COPY data.json  .
+  USER user
+  EXPOSE 3000
++ CMD ["/sbin/tini", "--","node", "app.js" ]
+```
+
+## Some general tips
+
+- Combine commands to reduce the number of layers. This improves build performance and reduces the image size.
+- Prefer COPY over ADD unless you specifically need the features of ADD, as COPY is more transparent.
+- Use labels to provide metadata for your images, making them easier to manage and identify.
+- Avoid hardcoding sensitive information like passwords directly in the Dockerfile. Use Docker secrets or environment variables instead.
+- Periodically update your base images to patch security vulnerabilities and benefit from the latest features.
+- Always scan Docker images for vulnerabilities with tools like Docker Scout.
+- Tools like Haskell Dockerfile Linter (Hadolint) can detect bad practices in your Dockerfile and even expose issues inside the shell commands executed by the RUN instruction.
