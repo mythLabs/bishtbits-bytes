@@ -1,0 +1,125 @@
+---
+title: 'Multi stage and multi platform docker build'
+date: '2023-12-15'
+lastmod: '2023-12-15'
+tags: ['docker', 'dockerfile', '.Net Core','nodejs','builds']
+draft: false
+summary: 'Its time to make better docker images'
+---
+
+# Introduction
+
+The concepts of multi-stage and multi-platform Docker builds, two powerful techniques that have gained prominence in the DevOps community. Multi-stage builds enable developers to streamline the construction of Docker images by breaking down the process into multiple stages, while multi-platform builds facilitate the creation of images that seamlessly run on various architectures and operating systems.
+
+Lets take a look at both
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+# Multi Stage Builds
+
+Generally, when we build a Docker image, we take a base image and iteratively configure it according to our application's needs. However, there are scenarios where we need some files from one base image and some from another, or we need to cache specific heavy layers.
+
+To address this, Docker multibuild allows us to provide multiple base images [From statements] and pass on specific data from one stage to another. This can be creatively used to reduce the image size, narrow the security scope, and enable layer caching.
+
+Let's consider an example of building a [.NET Web API](https://github.com/mythLabs/blog-content/tree/main/multistage-docker-builds/project). But before that, we need to understand what is meant by building and running that API.
+
+The .NET Framework's C# language is a compiled language, which means we write our code in C# and then release that code. The release process creates packaged files `machine code`, which are further used to run the actual API. This is in contrast to interpreted languages like JavaScript or Python, where we directly convert source code to machine code and run it.
+
+So, the process becomes: Write code -> Release package -> Run the package.
+
+Below is a single Dockerfile that runs this sample .NET Core API.
+
+```dockerfile:normal.dockerfile
+FROM mcr.microsoft.com/dotnet/sdk:8.0
+WORKDIR /app
+COPY . ./
+RUN dotnet restore
+RUN dotnet publish -c Release -o out
+CMD ["dotnet", "./out/project.dll"]
+```
+
+We build it using `docker build -t project -f normal.dockerfile .`
+
+![Docker image build output](/static/images/blog/Multi-stage-docker-builds/01.jpg)
+
+And run it with `docker run -p 3001:8080 project`. It works..
+
+![Docker image build output](/static/images/blog/Multi-stage-docker-builds/02.png)
+
+Now we can divide the normal.dockerfile file into two parts: one taking care of building the project and the other for running the project.
+
+When we build software, it requires a lot of dependencies compared to what is needed to run it. So, why should we package what is not required into the Dockerfile?
+
+```dockerfile:multistage.dockerfile
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS builder
+WORKDIR /app
+COPY . ./
+RUN dotnet restore
+RUN dotnet publish -c Release -o out
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0
+WORKDIR /app
+COPY --from=builder /app/out .
+ENTRYPOINT ["dotnet", "project.dll"]
+```
+
+> Let me explain
+
+In First section
+
+```dockerfile
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS builder
+```
+
+We use the `dotnet/sdk` base image as we need build dependencies and give it an alias for easy referencing.
+
+Then, we perform project-specific tasks, such as copying code, restoring packages in the project, and creating release files.
+
+Now in Second section,
+```dockerfile
+FROM mcr.microsoft.com/dotnet/aspnet:8.0
+```
+
+We switch to a base image that only has runtime dependencies.
+
+```dockerfile
+COPY --from=builder /app/out .
+```
+
+Now, this is the magic command where we copy the release files from the first build stage named `builder`'s `/app/out` location into our new built stage's current directory. Thus, we only take out what's required, and all other things like source code and build environment dependencies are omitted.
+
+Below is the difference in size between the normal docker image and the image with build stages.
+
+> Build with [normal.dockerfile](https://github.com/mythLabs/blog-content/blob/main/multistage-docker-builds/project/normal.dockerfile)
+![normal image](/static/images/blog/Multi-stage-docker-builds/03.png)
+
+> Build with [multistage.dockerfile](https://github.com/mythLabs/blog-content/blob/main/multistage-docker-builds/project/multistage.dockerfile)
+![normal image](/static/images/blog/Multi-stage-docker-builds/04.jpg)
+
+
+One other use of multistage builds is for caching. Let's check that out.
+
+```dockerfile:node.dockerfile
+FROM node:18 AS package-install
+WORKDIR /app
+COPY package*.json .
+RUN npm install
+
+FROM node:18.19.0-alpine as release
+WORKDIR /app
+COPY - from=package-install /app /app
+COPY . .
+CMD ['node', 'app.js']
+```
+
+Here, we are using a larger `node:18` image to install the npm packages and then copying them into a smaller `alpine` image. The package-install stage will be cached, and the build will be very fast, especially in the case of huge projects.
+
+# Multi Platform Builds 
+
+A Docker daemon works on multiple CPU architectures like `amd64`, `arm32v5`, `arm32v6`, `arm32v7`, `arm64v8`, `i386`, `ppc64le`, and `s390x`. Thus, we require an image of that specific type to run on it. To truly make our Dockerfile run anywhere, we need to create an image compatible with all these architectures. 
+
+Basically, if your colleagues create an image on their Ubuntu machine and you try to run it on your shiny Apple Mac with its silicone chips, it will fail. Thankfully, Docker CLI has us covered. We can use the `--platform` flag while building a Docker image for that specific platform.
+
+`docker build -t project --platform linux/amd64 .`
+
+This is the most basic way to generate a Docker image for a different platform. There are more advanced ways, like using Docker [Buildx](https://github.com/docker/buildx?tab=readme-ov-file), QEMU, etc., which I will cover in a separate article on Buildx.
+
