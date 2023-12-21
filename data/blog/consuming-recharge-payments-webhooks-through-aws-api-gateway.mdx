@@ -1,0 +1,243 @@
+---
+title: 'Consuming Recharge Payments Webhooks through AWS API Gateway'
+date: '2023-12-21'
+lastmod: '2023-12-21'
+tags: ['serverless', 'AWS API Gateway', 'AWS Lambda Function', 'Webhooks', 'AVTL']
+draft: false
+summary: 'Recently, I worked on consuming a webhook from Recharge Payments and opted to deploy it using an API Gateway + Lambda combination. Here are the key takeaways.'
+---
+
+# Problem Statement
+
+On [Recharge Payments](https://rechargepayments.com/), in the event of a card payment failure, we utilize a third-party [dunning service](https://sticky.readme.io/reference/smart-dunning-post). This service suggests a future date with a high probability of successful charging, and we subsequently update Recharge to automatically retry the transaction on that specified date.
+
+<TOCInline toc={props.toc} exclude="Problem Statement" />
+
+# Proposed Infrastructure
+
+This use case was compelling us to adopt a serverless solution. Consequently, we proceeded with a robust combination of `API Gateway + Lambda`.
+
+> Amazon API Gateway is a fully managed service offered by Amazon Web Services (AWS) that allows developers to create, publish, maintain, monitor, and secure APIs at any scale. It acts as a gateway for managing and deploying APIs, making it easier to connect applications to back-end services.
+
+> AWS Lambda is a serverless computing service provided by Amazon Web Services (AWS) that allows developers to run code without the need to provision or manage servers. It is designed to execute functions in response to events and automatically scales based on demand.
+
+Why ????
+- We don't need a long-running server.
+- Our business logic also wasn't long-running; it took less than 3 seconds.
+- We aimed to deploy and forget.
+- Low Cost.
+- There was basically no measurable computation; only API calls were made, with JSON being the only data sent. (FYI, API Gateway has a [limit](https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html#http-api-quotas) on file size if you decide to create a file upload API.)
+
+# Apache Velocity template
+
+API Gateway and Lambda are independent, decoupled services that can be used in conjunction with multiple other AWS services. Both have individual ways of sending and receiving data. Thus, some sort of data transformation is required, which can be done in different ways at the gateway.
+
+- <strong>Lambda Proxy</strong>
+
+  While creating a REST method on API Gateway and setting the target to a lambda (we will discuss this in detail below), you can choose to integrate it as a `lambda proxy integration`. This transforms the data received by the Gateway, including headers and the body, into a single event object, which is then passed on to the lambda for consumption. 
+  
+  However, this didn't work for us, as we also needed to implement [webhook source verification](https://docs.rechargepayments.com/docs/webhooks-overview#validating-webhooks), and generating the HMAC256 of the payload required a very specific kind of stringified JSON in the body, which we were not obtaining through the proxy.
+
+- <strong>Mapping template</strong>
+
+    By using [Apache Velocity Template Language](https://velocity.apache.org/engine/1.7/vtl-reference.html) we can fine tune the data that is forwarded by Api Gateway. [Read More](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-mapping-template-reference.html)
+
+```velocity:mapping-template
+{
+  "body" : $input.json('$'),
+  "rawbody": "$util.escapeJavaScript($input.body)",
+  "headers": {
+    #foreach($header in $input.params().header.keySet())
+    "$header": "$util.escapeJavaScript($input.params().header.get($header))" #if($foreach.hasNext),#end
+
+    #end
+  },
+  "method": "$context.httpMethod",
+  "params": {
+    #foreach($param in $input.params().path.keySet())
+    "$param": "$util.escapeJavaScript($input.params().path.get($param))" #if($foreach.hasNext),#end
+
+    #end
+  },
+  "query": {
+    #foreach($queryParam in $input.params().querystring.keySet())
+    "$queryParam": "$util.escapeJavaScript($input.params().querystring.get($queryParam))" #if($foreach.hasNext),#end
+
+    #end
+  }  
+}
+```
+
+> Let me explain
+
+
+> ```velocity
+> "body" : $input.json('$'),
+> ```
+> We receive the payload body.
+
+> ```velocity
+> "rawbody": "$util.escapeJavaScript($input.body)",
+> ```
+> We obtain the body in its raw form, as a JSON string, preserved exactly as the API sends it to us. <strong>This is essential for generating the webhook verification hash.</strong>
+
+> ```velocity
+> "headers": {
+>   #foreach($header in $input.params().header.keySet())
+>   "$header": "$util.escapeJavaScript($input.params().header.get($header))" #if($foreach.hasNext),#end
+>
+>   #end
+>  },
+> ```
+> A straightforward for loop is employed to iterate through all headers and create a header object.
+
+> ```velocity
+> "query": {
+>   #foreach($queryParam in $input.params().querystring.keySet())
+>   "$queryParam": "$util.escapeJavaScript($input.params().querystring.get($queryParam))" #if($foreach.hasNext),#end
+>
+>   #end
+>  }  
+> ```
+> A basic for loop is utilized to iterate through all query parameters and generate a query object.
+
+This is a generalized template that can be applied to any lambda function and can be further customized if specific adjustments are needed.
+
+# Get Tokens from recharge
+
+Go to their console and generate the API token. We will need the API token and the client secret <strong>(auto-generated when you create the token; simply go to the token details page and copy it)</strong>.
+
+Follow this [doc](https://docs.rechargepayments.com/docs/recharge-api-key) and don't forget to choose the correct scope if you need to use the Recharge API further; they mention it in the API documentation.
+
+
+We ended up using two additional APIs mentioned below, so choose the scope accordingly.
+- [Update the next date of retry](https://developer.rechargepayments.com/2021-01/charges/charge_change_next_date)
+- [Save data to metafield in order to track retries](https://developer.rechargepayments.com/2021-01/metafields/metafields_create)
+
+# Create AWS Lambda
+
+- Login to the AWS Console and go to the Lambda section to create a new function.
+![New Lambda](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/01.png)
+
+
+- Create a Lambda with basic configuration. We used Python.
+![python Lambda](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/02.png)
+
+- Add handler Code.
+```python:lambda_function.py
+import json
+import urllib3
+import os
+import hashlib
+
+http = urllib3.PoolManager()
+headers = {'Content-Type': 'application/json', 'accept': 'application/json'}
+
+RECHARGE_TOKEN = os.getenv('RECHARGE_API_TOKEN')
+RECHARGE_CLIENT_SECRET = os.getenv('RECHARGE_CLIENT_SECRET')
+    
+    
+def isWebhookValid(request_body, webhook_hmac):
+    client_secret = RECHARGE_CLIENT_SECRET
+    calculated_hmac = hashlib.sha256()
+    calculated_hmac.update(client_secret.encode("UTF-8"))
+    calculated_hmac.update(request_body.encode("UTF-8"))
+    calculated_hmac = calculated_hmac.hexdigest()
+    
+    if calculated_hmac == webhook_hmac:
+        print("Webhook validated successfully!")
+        return True
+    else:
+        print("Oops! There may be some third party interference going on.")
+        return False
+
+
+def get_data(url, headers=None):
+    r = http.request('GET', url, headers=headers)
+    return json.loads(r.data)
+
+
+def post_data(url, obj, headers=None):
+    r = http.request('POST', url, headers=headers, body=json.dumps(obj))
+    return json.loads(r.data)
+   
+def lambda_handler(event, context):
+    try:
+        print(event)
+        isValid = isWebhookValid(event["rawbody"], event["headers"]['X-Recharge-Hmac-Sha256'])
+        
+        if not isValid:
+            return
+        
+        webhookBody = event["body"]
+        print(webhookBody)
+        
+        # Add your business logic now. You can use get_data and post_data to perform API calls, 
+        # or attach a layer to this Lambda containing your favorite package and use that.
+        
+        
+        return {
+            'statusCode': 200,
+        }
+    except Exception as e:
+      print(e)
+```
+
+- Add keys to the Lambda environment.
+
+  Go to Lambda's configuration -> Environment variables and add `RECHARGE_API_TOKEN`, `RECHARGE_CLIENT_SECRET`.
+
+
+# Create API Gateway
+
+- Go to the API Gateway section and create a new REST API.
+![api gateway type](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/03.png)
+
+- Create a new API.
+![api gateway config](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/04.png)
+
+- Create a new resource in that API.
+![api gateway resource](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/05.png)
+
+- Add the resource name.
+![api gateway resource config](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/06.png)
+
+- Create an HTTP method on the resource.
+![api gateway method](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/07.png)
+
+- Create a POST type method and select the target as the Lambda function we created earlier.
+![api gateway method config](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/08.png)
+
+- Select the method and edit the Integration Request tab to perform manipulation.
+![api gateway integration request](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/09.png)
+
+- Change the "Request body pass through" setting.
+![api gateway pass through](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/10.png)
+
+- Scroll all the way down and add our mapping template.
+![api gateway mapping](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/11.png)
+
+- Now, it's finally time to deploy the API.
+![api gateway deploy button](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/12.png)
+
+![api gateway deploy dialog](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/13.png)
+
+- Go to stages and obtain the API URL. It would become https://8fn4xarxng.execute-api.us-west-1.amazonaws.com/dev/<strong>webhook</strong>.
+![api gateway url ](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/14.png)
+
+- After sending a simple `POST` request with dummy data through Postman, we receive logs in `AWS CloudWatch`, and behold the beautiful payload.
+![log](/static/images/blog/consuming-recharge-payments-webhooks-through-aws-api-gateway/15.png)
+
+
+# Register the webhook on the Recharge platform.
+
+So Recharge does not provide a UI for it. They expose public endpoints to create, list, and delete them.
+Find them [here](https://developer.rechargepayments.com/2021-01/webhooks_endpoints)
+
+FYI, use the same API token that you added to Lambda.
+
+<strong>And voilà, we are done.</strong>
+
+
+> <strong>Thanks for reading!</strong>
+
