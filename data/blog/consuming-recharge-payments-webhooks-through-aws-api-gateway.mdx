@@ -44,7 +44,7 @@ API Gateway and Lambda are independent, decoupled services that can be used in c
 
 ```velocity:mapping-template
 {
-  "body" : $input.json('$'),
+  "body": $input.json('$'),
   "rawbody": "$util.escapeJavaScript($input.body)",
   "headers": {
     #foreach($header in $input.params().header.keySet())

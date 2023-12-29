@@ -1,0 +1,239 @@
+---
+title: 'Load Testing With Locust'
+date: '2023-12-29'
+lastmod: '2023-12-29'
+tags: ['python', 'loadtesting']
+draft: false
+summary: 'Locust has became one of my favourite load testing tool'
+---
+
+# Introduction
+
+<strong>Load testing</strong> is a type of software testing that evaluates a system's performance under expected and peak load conditions. The goal is to identify the system's capacity limits, potential bottlenecks, and its ability to handle a specific volume of concurrent users or transactions.
+
+There are multiple load testing tools available in the market, but [Locust](https://locust.io/) has caught my attention due to its numerous configuration options and its adaptability for use by multiple actors and it is `OSS`. It can be integrated into your `CI/CD pipeline` through the command line interface (CLI) and can be utilized by the QA team, providing them with `a user-friendly interface` featuring extensive reporting and visualization options. The only caveat is that you need to have a basic understanding of Python.
+
+I have created a small Node server and a Locust repository, which we will use in this article. Both of these can be found [here](https://github.com/mythLabs/blog-content/tree/main/Loadtesting-with-locust/project).
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+# Installation
+    Locust gets installed as a `Python pip package`. Just run:
+    - pip3 install locust
+    - locust -V
+
+# Basics
+
+  - Let's start by launching a small Node server on which we will perform tests. Clone this repository and, inside `Loadtesting-with-locust/project`, install packages with `npm install`. Then, run `node app.js` to start the server.
+
+    ![server start](/static/images/blog/load-testing-with-locust/01.png)
+
+  - Locust needs a `Python file` where we write basic classes and functions that will be interpreted as a test suite. A simple version of the file would look something like the one below:
+
+```python:01.load-test.py
+from locust import FastHttpUser, task
+
+class RootTest(FastHttpUser):
+    @task
+    def home(self):
+        self.client.get("/")
+```
+
+> ```python
+> from locust import FastHttpUser, task
+> ```
+> For the Locust Python package, we are importing FastHttpUser and User. 
+>
+> The FastHttpUser call provides us with an instance of `HttpSession`, which has the actual definition of the get, post, etc. functions that we use. 
+>
+> The `@task` is a decorator that we put before a function to let the system know it's a test. Functions without it are just treated as helper functions.
+
+> ```python
+> class RootTest(FastHttpUser):
+>   @task
+>   def home(self):
+>       self.client.get("/")
+> ```
+> Here, RootTest inherits from the `FastHttpUser` class and is actually a test suite. We can add multiple test executions in one suite. For example, here, we have a single test that makes a GET call on the root.
+
+- Now to perform this test we have two ways, 
+    - <strong>UI</strong>
+
+        Locust spins up a web server and serves a UI on which we can input the domain, `number of users` (peak concurrency), `spawn rate` (frequency with which users will increase, for example, we can increase 5 users every 1 second), and the `runtime` of the test
+
+        Run Command: `locust -f 01.load-test.py` Here, with the -f option, we provide it with the test configuration we wrote.
+
+        ![Starter](/static/images/blog/load-testing-with-locust/02.png)
+
+        ![Starter UI](/static/images/blog/load-testing-with-locust/03.png)
+
+        Let's run it for a peak load of `50 concurrent users` and `step up by 10 users per second for a duration of 30 seconds`. Our host address will be that of the Node server we started: http://localhost:3000.
+
+        On the UI, you are able to view live results, and once the test is completed or manually stopped, you can see a plethora of analysis.
+
+        ![stats](/static/images/blog/load-testing-with-locust/04.png)
+
+        ![charts](/static/images/blog/load-testing-with-locust/05.png)
+
+        And many more tabs on the UI.
+    
+    - <strong>Command Line</strong>
+
+        Locust can also be executed through the command line, perfect for creating automations around load testing, which is how it should actually be used.
+
+        Run Command: `locust -f 01.load-test.py --headless --users 50 --spawn-rate 10  --run-time 30s -H http://localhost:3000`
+
+        ![cli](/static/images/blog/load-testing-with-locust/06.png)
+
+        As you can see, even in `headless` mode, it provides results through `STDOUT`.
+
+        We can also create a `Locust config` [file](https://github.com/mythLabs/blog-content/blob/main/Loadtesting-with-locust/project/load-tests/lo.conf) where we can set up things like host, runtime, spawn rate, etc., and use that file, 
+        e.g., `locust -f 01.load-test.py --config lo.conf`
+
+        Try `locust -h` to view all available flags.
+
+# Advance
+    Getting it up and running is a pretty simple task, but nothing is simple in real life. Let's look at some advanced features that will definitely get used.
+
+    Some common concepts are covered in the file below; we'll go through the code now.
+
+```python:02.load-test.py
+from locust import HttpUser, task, between, events
+import time
+from json import JSONDecodeError
+
+@events.test_start.add_listener
+def on_test_start(environment, **kwargs):
+    print("Logging test start. Sending notification")
+
+@events.test_stop.add_listener
+def on_test_stop(environment, **kwargs):
+    print("Logging test stop. Sending test report")
+
+@task
+def home(self):
+    with self.client.get("/", catch_response=True, name="home-page") as response:
+        if response.elapsed.total_seconds() > 1:
+            response.failure("Request took too long")
+
+@task
+def view_products(self):
+    for item_id in range(10):
+        with self.client.get(f"/products?id={item_id}", catch_response=True, name="/products") as response:
+            try:
+                if response.json()["productId"] != str(item_id):
+                    response.failure("Did not get expected value")
+            except JSONDecodeError:
+                response.failure("Response could not be decoded as JSON")
+            except KeyError:
+                response.failure("Response did not contain expected key 'greeting'")
+            time.sleep(1)
+
+class NormalUser(HttpUser):
+    wait_time = between(1, 5)
+
+    tasks = {home: 2, view_products: 1}
+    
+    def on_start(self):
+        self.client.post("/signin", json={"username":"foo", "password":"bar"})
+
+class WindowShopperUser(HttpUser):
+    wait_time = between(1, 2)
+
+    tasks = {home: 1, view_products: 3}
+    
+    def on_start(self):
+        self.client.post("/signin", json={"username":"foo", "password":"bar"})
+```
+
+> ```python
+> @events.test_start.add_listener
+> def on_test_start(environment, **kwargs):
+>   print("Logging test start. Sending notification")
+> ```
+> We get event hooks like test_start and test_stop to perform any actions. We can also use events to add custom command line arguments.
+
+> ```python
+> @task
+> def home(self):
+>   with self.client.get("/", catch_response=True, name="home-page") as response:
+>       if response.elapsed.total_seconds() > 1:
+>           response.failure("Request took too long")
+> ```
+> We can use catch_response to capture the result and perform things like throwing a custom error if the request took longer than our threshold.
+
+> ```python
+> @task
+> def view_products(self):
+>   for item_id in range(10):
+>       with self.client.get(f"/products?id={item_id}", catch_response=True, name="/products") as response:
+>           try:
+>               if response.json()["productId"] != str(item_id):
+>                   response.failure("Did not get expected value")
+>           except JSONDecodeError:
+>               response.failure("Response could not be decoded as JSON")
+>           except KeyError:
+>               response.failure("Response did not contain expected key 'greeting'")
+>           time.sleep(1)
+> ```
+> Here, we have a dynamic URL where we are passing a value through string interpolation and exploring different ways to throw custom errors. 
+>
+> Sleep can be used to simulate a delay in behavior closer to an actual human user.
+
+> ```python
+> class NormalUser(HttpUser):
+>   wait_time = between(1, 5)
+>
+>   tasks = {home: 2, view_products: 1}
+>   
+>   def on_start(self):
+>       self.client.post("/signin", json={"username":"foo", "password":"bar"})
+> ```
+> This is a test suite, where `wait_time` defines a random duration in seconds after which an action will be performed. This would make the simulation closer to real-life activity. 
+>
+> We can run a specific suit at a time e.g, `locust -f 02.load-test.py --config lo.conf NormalUser`
+>
+> The `tasks` dictionary holds the task names that we want to run as part of this particular suite. Along with the name of the task, we have a weight that will help us distribute the requests as we like among the tasks. 
+>
+> `on_star`t runs once when the suite starts to perform pre-execution steps like logging in the user, etc.
+
+For huge operations, Locust also provides us the setup for a master-slave architecture for `distributed load generation`. We create a master server and attach multiple worker servers to it, and we can use them to generate load. And nothing is complete nowadays without `Docker`, through which Locust works flawlessly.
+
+Below is a Docker Compose file that creates the distributed load generation setup easily with one master and one slave.
+
+```docker-compose
+version: "3"
+
+services:
+  master:
+    image: locustio/locust
+    ports:
+      - "8089:8089"
+    volumes:
+      - ./:/mnt/locust
+    command: -f /mnt/locust/02.load-test.py --master -H https://github.com/
+
+  worker:
+    image: locustio/locust
+    volumes:
+      - ./:/mnt/locust
+    command: -f /mnt/locust/02.load-test.py --worker --master-host master
+
+```
+We just need to run `docker-compose up`, and things will fly. Truly, I have become a fan.
+
+![docker compose up](/static/images/blog/load-testing-with-locust/07.png)
+
+![workers](/static/images/blog/load-testing-with-locust/08.png)
+
+
+There are tons and tons of features, configurations, and options available for more advanced use cases. You can go through their documentation here.
+
+<strong>Thanks for reading!</strong>
+
+
+
+    
+
+
+
