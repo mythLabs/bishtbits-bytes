@@ -1,0 +1,228 @@
+---
+title: 'Subprocesses in Python'
+date: '2024-01-07'
+lastmod: '2024-01-07'
+tags: ['python', 'subprocess']
+draft: false
+summary: 'Lets learn about python subprocess module'
+---
+
+# Introduction
+
+There are many instances when I automate tasks with Python, and it is not always possible to use APIs. Sometimes, I have to resort to using the command-line interface (CLI), and running them as subprocesses comes to the rescue.
+
+The [subprocess module](https://docs.python.org/3/library/subprocess.html) in Python enables the `creation, interaction, and management of subprocesses`. It allows a Python script to `spawn external processes, communicate with them, and retrieve their results`. This module is useful for executing system commands, running external programs, and handling input/output streams between the main script and subprocesses. Through the subprocess module, Python provides a versatile and powerful way to seamlessly incorporate external processes into its scripts, enhancing the capabilities and flexibility of Python applications.
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+# Python subprocess module
+    
+    You may already be familiar with functions like `call()`, `check_call()`, and `check_output()`, but these belong to the older subprocess API from `Python 3.5` and earlier. Although they are still present in newer Python versions, they are included primarily to provide backward compatibility.
+
+    We will use the subprocess module via the `run()` function, an updated implementation from `Python version 3.8` onwards. It is a `blocking function` that waits for the process to finish. run() can generally cover the maximum use cases, but for some niche edge cases, we have `Popen`, which we will discuss at the end of this article.
+
+# Basic Usage
+
+    All Code available on my github. [here](https://github.com/mythLabs/blog-content/tree/main/python-subprocesses)
+
+    Let's assume we are writing a Python script to manipulate Docker images on a machine, and we want to do this using the CLI installed on that particular machine.
+
+    ```python:subp.py
+    import subprocess
+    subprocess.run(["docker", "image", "ls"])
+    print("completed")
+    ```
+
+    This is a simple code that imports the module and runs the command, which is passed as individual tokens. Below is the result.
+
+    ![Docker](/static/images/blog/subprocesses-in-python/01.png)
+
+    It returns an instance of `CompletedProcess class` which returns exit code of the subprocess command.
+
+    ![return code](/static/images/blog/subprocesses-in-python/02.png)
+
+    Lets create shell script that we will run as a subprocess. A frequent case that i deal with daily.
+
+    ```bash:bscript.sh
+    #!/bin/bash
+
+    echo "running for $1 times"
+    x=1
+    while [ $x -le $1 ]
+    do
+        echo "."
+        x=$(( $x + 1 ))
+        sleep 1
+    done
+    ```
+
+    This simple bash script generates "." in x amount after 1 second. x is passed a commmand line argument. Looks something like this.
+
+    ![script](/static/images/blog/subprocesses-in-python/03.png)
+
+    Now we run this script from our python code.
+
+    ```python:subp.py
+    import subprocess
+    completed_process = subprocess.run(["./bscript.sh", "4"])
+    ```
+
+    # Exception handling
+
+    In real world thing don't always go write. what if there is some sort of error in the subprocess we should handle it.
+
+    Easiest would be to check for `non-zero return code` which are universally regarded as error.
+
+    Lets update our shell script to throw error by using exit with a non-zero code.
+
+    ```shell:bscript.sh
+    #!/bin/bash
+    exit 12
+    echo "running for $1 times"
+    x=1
+    while [ $x -le $1 ]
+    do
+        echo "."
+        x=$(($x + 1))
+        sleep 1
+    done
+    ```
+
+    so at this point i would like to introduce two important arguments of the run() function:- `check`, `timeout`.
+    `check=True` is used to capture exceptions for subprocess; otherwise, it will fail silently.
+    `timeout` is employed to set a limit for which run() will `wait for the subprocess command to complete`, as there may be a chance that, due to some problem, the subprocess could run infinitely.
+
+    ```python:subp.py
+    import subprocess
+
+    completed_process = subprocess.run(["./bscript.sh", "4"],
+                                    check=True,
+                                    timeout=10)
+    print("completed")
+    print(completed_process)
+    print(completed_process.returncode)
+    ```
+
+    And here is the exception.
+
+    ![exception](/static/images/blog/subprocesses-in-python/04.png)
+
+    Apart from a non-zero exit code, there are two more errors that we can handle:
+        - If the subprocess command does not exist, it may be due to a typo, etc., and it throws a `FileNotFoundError` error.
+        - If the subprocess continues more than the timeout, then it throws a `TimeoutExpired` error."
+
+    Let's create a full-fledged script to handle all exceptions.
+
+    ```python:subp.py
+    import subprocess
+
+    try:
+        subprocess.run(
+            ["./bscript.sh", "4"], timeout=1, check=True
+        )
+    except FileNotFoundError as exc:
+        print(f"Executable not found.\n{exc}")
+    except subprocess.CalledProcessError as exc:
+        print(
+            f"Unsuccessful return code."
+            f"Returned {exc.returncode}\n{exc}"
+        )
+    except subprocess.TimeoutExpired as exc:
+        print(f"Process timed out.\n{exc}")
+    ```
+
+    Here are the results of all types of exceptions.
+
+    ![exception1](/static/images/blog/subprocesses-in-python/05.png)
+
+    ![exception2](/static/images/blog/subprocesses-in-python/06.png)
+
+    ![exception3](/static/images/blog/subprocesses-in-python/07.png)
+
+# Communication
+
+    Streams are the way communication happens with processes.
+
+    When we initialize a process, three streams are created:
+
+    - <strong>stdin</strong>: The process reads input from this.
+    - <strong>stdout</strong>: The process writes output to this.
+    - <strong>stderr</strong>: The process writes errors to this.
+
+    The subprocess fills up `stdout` and `stderr`, and we fill up `stdin`. Then we read the data in stdout and stderr, and the subprocess reads from stdin.
+
+    To capture the output, we need to use another argument for run(), which is `capture_output=True`.
+
+    Now, let's actually use the data from the subprocess rather than just displaying it.
+
+    ```python:subp.py
+    import subprocess
+
+    completed_process = subprocess.run(
+        ["./bscript.sh", "4"], timeout=10, check=True, capture_output=True
+    )
+    print("In main python script")
+    print(completed_process.stdout)
+    ```
+    And here is what we get
+
+    ![use stdout](/static/images/blog/subprocesses-in-python/08.png)
+
+    As you can see, it returns data as a `bytes` object, so keep `encoding in mind`.
+
+    Also, the stdout of the `CompletedProcess` is no longer a stream. The stream has been completely read,
+    and it’s now stored as byte object in the .stdout.
+
+    To handle encoding, we can use the `encoding="utf-8"` argument of run, and it will give beautiful results.
+
+    ```python:subp.py
+        subprocess.run(["./bscript.sh", "4"], timeout=10, check=True, capture_output=True,  encoding="utf-8")
+    ```
+
+    ![use stdout](/static/images/blog/subprocesses-in-python/09.png)
+    
+# Popen
+
+    The actual underlying class that is abstracted when we use run() is Popen. When we pass configuration parameters to run(), we are essentially initializing Popen with specific constructor parameters.
+
+    The main distinction lies in the fact that Popen runs `asynchronously`, enabling subprocess execution in `parallel`, while run() is `synchronous`. run() is sufficient for covering the majority of use cases, but for more advanced scenarios, Popen is available at your disposal.
+
+    Let's write a small program and study its output.
+
+    ```python:popen.py
+    import subprocess
+    from time import sleep
+
+    with subprocess.Popen(
+        ["./bscript.sh", "5"], stdout=subprocess.PIPE
+    ) as process:
+
+        def poll_and_read():
+            print(f"polling: {process.poll()}")
+            print(f"stdout: {process.stdout.read1().decode('utf-8')}")
+
+        poll_and_read()
+        sleep(2)
+        poll_and_read()
+        sleep(2)
+        poll_and_read()
+    ```
+
+    This program invokes our Bash script containing timer code within a [context manager](https://docs.python.org/3/library/contextlib.html) using `with`  and assigns its standard output to a pipe.
+
+    The `poll()` method is employed to check whether the process has terminated. If it is still running, it returns `None`; otherwise, it provides the `exit code`.
+
+    Lastly, the program utilizes `.read1()` to read as many bytes as are available from .stdout.
+
+    Here's the output:
+
+    ![popen result](/static/images/blog/subprocesses-in-python/10.png)
+
+    We can observe the transition of polling results from None to 0 (the exit code), along with the standard output output of the subprocess.
+
+# os.system vs subprocess
+    - Python.org has `deprecated` os.system and encourages the transition to the newer subprocess module, particularly using run() (recommended since Python 3.5).
+    - os.system directly executes the command in a shell, making it susceptible to shell injection, also known as command injection.
+
+
+
+
