@@ -6,7 +6,7 @@ const siteMetadata = {
   description: 'Preachings of an average tech bro',
   language: 'en-us',
   theme: 'system', // system, dark or light
-  siteUrl: 'https://amitbrewscode.vercel.app',
+  siteUrl: 'https://amitbrewscode.in',
   siteRepo: 'https://github.com/mythLabs/bishtbits-bytes',
   siteLogo: '/static/images/logo.png',
   socialBanner: '/static/images/logo.png',
