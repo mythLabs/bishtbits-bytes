@@ -1,0 +1,450 @@
+---
+title: 'Docker Compose makes life easier'
+date: '2024-01-14'
+lastmod: '2024-01-14'
+tags: ['docker', 'docker-compose']
+draft: false
+summary: 'Lets go into the details of Docker Compose and learn to use it effectively. The ease of it will make you smile.'
+---
+
+## Introduction
+
+The more I use it, the more I love it.
+
+[Docker Compose](https://docs.docker.com/compose) is a tool for `defining and managing multi-container Docker applications`. It allows you to define the `services`, `networks`, and `volumes` in a YAML file, making it easy to configure and deploy complex applications with multiple interconnected components.
+
+I have used Docker Compose for everything from debugging and testing to developing and for multiple Proof of Concepts (POCs). Although it's not recommended for production as there are better tools like` Kubernetes`, `Docker Swarm`, etc.
+
+Let's learn about all of its concepts.
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+## Basic
+
+We would need to write the configuration of our setup in a [YAML file](https://github.com/mythLabs/blog-content/blob/main/docker-compose/01.compose.yaml), and the Docker Compose CLI will create the environment from it.
+
+Let's create a very simple file and run it. We will deploy only one service, which will be an Nginx server.
+
+```yaml:01.compose.yaml
+services:
+  frontend:
+    image: nginx
+    ports:
+      - "8080:80"
+```
+
+Here, services can contain multiple different Docker images running as services, which are exposed using the service name to each other. For example, if there was a service named `backend`, then the frontend server would use `backend` as the hostname to connect to it.
+
+And it is exposed with the `ports` key.
+
+Run command: `docker compose -f 01.compose.yaml up`
+
+![Compose up](/static/images/blog/docker-compose-makes-life-easier/01.png)
+
+We can see it pulls the image and runs it, but in the foreground. 
+
+To run it in the background in daemon mode: `docker compose -f 01.compose.yaml up -d`
+
+![Compose d](/static/images/blog/docker-compose-makes-life-easier/02.png)
+
+To stop it: `docker compose -f 01.compose.yaml down`
+
+![Compose stop](/static/images/blog/docker-compose-makes-life-easier/03.png)
+
+## Sample Usage
+
+The full app code is [here](https://github.com/mythLabs/blog-content/tree/main/docker-compose/01.redis-app).
+
+Let's create an actual environment where we will have a frontend server, a Redis server, and both will communicate with each other. We will delve into multiple advanced concepts too.
+
+This code is available in the official Docker docs as [well](https://docs.docker.com/compose/gettingstarted/).
+
+We create a Flask server that connects to a Redis server and displays data from Redis on a webpage. In the `server.py` file, you can see that for connecting to Redis, the value for the host is set to `redis`. Here, this means that through Docker Compose, we will create a service named redis, and our Flask app will connect using its name as the host.
+
+```python:server.py
+import time
+
+import redis
+from flask import Flask
+
+app = Flask(__name__)
+cache = redis.Redis(host='redis', port=6379) #connecting to service named redis
+
+def get_hit_count():
+    retries = 5
+    while True:
+        try:
+            return cache.incr('hits')
+        except redis.exceptions.ConnectionError as exc:
+            if retries == 0:
+                raise exc
+            retries -= 1
+            time.sleep(0.5)
+
+@app.route('/')
+def hello():
+    count = get_hit_count()
+    return 'Hello World! I have been seen {} times.\n'.format(count)
+```
+
+
+```yaml:compose.yaml
+services:
+  web:
+    build: .
+    ports:
+      - "8000:5000"
+  redis:
+    image: "redis:alpine"
+``` 
+
+We see a `build` section above instead of an image, so instead of downloading an image from a [remote registry](https://hub.docker.com/_/redis) or using a cached image if built through Compose, we can use the command `docker-compose build`.
+
+FYI, if you don't pass a Compose YAML file with `-f`, it will default to using any file in the root named `docker-compose.yaml`.
+
+Now you can see the app is exposed on `http://localhost:8000/`, and on each refresh, it fetches data from Redis.
+
+![Compose app](/static/images/blog/docker-compose-makes-life-easier/04.png)
+
+Thus, we have set up inter-service communication and can add multiple services and make them communicate with each other. We will improve this particular Compose file, server.py, to learn about more advanced concepts.
+
+At this point, a few Compose commands should be known:
+
+- `docker-compose pull` -> pulls fresh Docker images
+- `docker-compose build` -> Build or rebuild services
+- `docker-compose down` -> Stop and remove containers, networks
+- `docker-compose events` -> Receive real-time events from containers.
+- `docker-compose watch` -> Watch the build context for services and rebuild/refresh containers when files are updated
+
+## Environment variables
+
+The full app code is [here](https://github.com/mythLabs/blog-content/tree/main/docker-compose/02.redis-app).
+
+We can use environment variables on two fronts to make things highly flexible: at the Compose file level and at the container level. Let's check it out.
+
+```diff-yaml:compose.yaml
+services:
+  web:
+    build: .
+    ports:
+      - "8000:5000"
++    environment:
++      - ENVKEY=DEV
+  redis:
++    image: "redis:${REDIS_TAG}"
+```
+
+Here, we are using an environment variable `REDIS_TAG` to make the Compose file configurable and passing `ENVKEY` into the container for its use. We can also make the value for `ENVKEY` dynamic and use it in code.
+
+We have created a new file named `compose-env.txt` containing just a key-value pair.
+
+Run it using:- `docker compose --env-file compose-env.txt up`
+
+I am printing the `ENVKEY` here at the end.
+
+![Compose env](/static/images/blog/docker-compose-makes-life-easier/05.png)
+
+We have multiple ways to transfer environment variables to it, and there is an order of precedence among them. Check them [here](https://docs.docker.com/compose/environment-variables/envvars-precedence/).
+
+## Secrets
+
+The full app code is [here](https://github.com/mythLabs/blog-content/tree/main/docker-compose/03.redis-app).
+
+A secret is any piece of data, such as a password, certificate, or API key, that should not be transmitted over a network or stored unencrypted in a Dockerfile or your application’s source code.
+
+> But why do we need this ?
+
+If you inject passwords and API keys as environment variables, you risk unintentional information exposure. Environment variables are often accessible to all processes, and tracking access can be challenging. Additionally, they may be inadvertently printed in logs when debugging errors without your knowledge.
+
+Let's create a file called `secret.txt` containing a key-value pair. In actual use, this file should be populated using some third-party vault.
+
+```diff-yaml:compose.yaml
+services:
+  web:
+    build: .
+    ports:
+      - "8000:5000"
+    environment:
+      - ENVKEY=DEV
++    secrets:
++      - app_secret
+  redis:
+    image: "redis:${REDIS_TAG}"
++ secrets:
++  app_secret:
++    file: ./secret.txt
+```
+
+We create a separate entity called `secrets` that holds the file path to the secret, and we attach this secret to our web service. Inside the service, this will create a file named `app_secret` at /run/secrets/app_secret, and we can read this file and use its content.
+
+As shown below, I am just reading the file and printing it on the UI.
+
+![Compose env](/static/images/blog/docker-compose-makes-life-easier/06.png)
+
+## Service Profiles
+
+The full app code is [here](https://github.com/mythLabs/blog-content/tree/main/docker-compose/04.redis-app).
+
+Profiles help selectively start services, achieved by assigning each service to zero or more profiles. If unassigned, the service is always started; however, if assigned, it is only started if the profile is activated.
+
+This feature enables us to define multiple services in a single docker-compose.yml file that should only be started in specific scenarios, such as debugging or development tasks.
+
+```diff-yaml:compose.yaml
+services:
+  web:
+    build: .
+    ports:
+      - "8000:5000"
+    environment:
+      - ENVKEY=DEV
+    secrets:
+      - app_secret
++    profiles: [webapp]
+  redis:
+    image: "redis:${REDIS_TAG}"
++   profiles: [webapp, api]
+  api:
+    image: "node:21-alpine3.18"
++   profiles: [api]
+secrets:
+  app_secret:
+    file: ./secret.txt
+```
+We see that there is a new key, `profiles` taking string arrays. 
+
+We start the app by using the `--profile` argument in the following run command: `docker compose --env-file compose-env.txt --profile webapp up`
+
+It will only start services that are profiled as `webapp` and if there is any service without a profile, there is no need to create two separate compose files.
+
+## Hot Reloads
+
+The full app code is [here](https://github.com/mythLabs/blog-content/tree/main/docker-compose/05.redis-app).
+
+While using `Bind mount`, a file or directory on the host machine is mounted into a container. The file or directory is referenced by its absolute path on the host machine. Thus, any changes made to the file on our file system are reflected in the container.
+
+```diff-yaml:compose.yaml
+services:
+  web:
+    build: .
+    ports:
+      - "8000:5000"
++   volumes:
++     - .:/code
+    environment:
+      - ENVKEY=DEV
+    secrets:
+      - app_secret
+    profiles: [webapp]
+  redis:
+    image: "redis:${REDIS_TAG}"
+    profiles: [webapp, api]
+  api:
+    image: "node:21-alpine3.18"
+    profiles: [api]
+secrets:
+  app_secret:
+    file: ./secret.txt
+```
+
+Above, using the `volume` key, the root directory from where docker-compose is executed is mounted into the `/code` path inside the container. However, Docker may not be aware if a file needs to be compiled or if some other process needs to be done on file change to run the app.
+
+Docker provides us with a `watch` feature. Watch tracks files for changes on the host and will `sync` or `rebuild` the container on change.
+
+```diff-yaml:compose.yaml
+services:
+  web:
+    build: .
+    ports:
+      - "8000:5000"
+    environment:
+      - ENVKEY=DEV
+    secrets:
+      - app_secret
+    profiles: [webapp]
++   develop:
++     watch:
++       - action: rebuild 
++         path: server.py
++       - action: sync 
++         path: .
++         target: ./code
+  redis:
+    image: "redis:${REDIS_TAG}"
+    profiles: [webapp, api]
+  api:
+    image: "node:21-alpine3.18"
+    profiles: [api]
+secrets:
+  app_secret:
+    file: ./secret.txt
+```
+Here, we are using the keyword `watch`. It can either rebuild the container or sync the files with the container. The path is the host path, and the target is the path inside the container.
+
+We run it using:- `docker compose --env-file compose-env.txt --profile webapp watch`
+
+![Compose watch](/static/images/blog/docker-compose-makes-life-easier/07.png)
+
+when we perform any changes in server.py it rebuilds and for secret.txt it syncs.
+
+![Compose sync](/static/images/blog/docker-compose-makes-life-easier/08.png)
+
+## Start up order
+
+The full app code is [here](https://github.com/mythLabs/blog-content/blob/main/docker-compose/06.redis-app/compose.yaml).
+
+With multiple services running and communicating with each other, some dependencies are bound to happen. For example, in our case, if for some reason Redis fails to start, the web server won't work alone. We need to make Compose aware that the `webapp` is dependent on Redis, which can be determined by using `depends_on`, `links`, `volumes_from`, etc.
+
+## Networking
+
+Here is the secret sauce of inter-service communication.
+
+By default, Compose sets up a single network for your app. Each container for a service joins the default network and is both reachable by other containers on that network and discoverable by the service's name. We are already doing this in all the above examples.
+
+We can use something called `links` to give an alias by which a service is reachable from another service.
+
+```diff-yaml:compose.yaml
+services:
+
+  web:
+    build: .
++   links:
++     - "db:database"
+  db:
+    image: postgres
+```
+
+The web can access the database service with the database.
+
+### Custom network
+
+We can specify our own custom networks with the `networks` key. It allows us to create more complex network structures and specify custom network drivers and options. We can also use it to connect services to externally-created networks.
+
+We can create service-level isolations, for example.
+
+```diff-yaml:compose.yaml
+services:
+  web:
+    build: .
+    ports:
+      - "8000:5000"
+    environment:
+      - ENVKEY=DEV
+    secrets:
+      - app_secret
+    profiles: [webapp]
++   networks:
++     - frontend
+    depends_on:
+      - redis
+    develop:
+      watch:
+        - action: rebuild 
+          path: server.py
+        - action: sync 
+          path: ./secret.txt
+          target: /run/secrets/app_secret
+  redis:
+    image: "redis:${REDIS_TAG}"
+    profiles: [webapp, api]
++   networks:
++     - backend
+  api:
+    image: "node:21-alpine3.18"
+    profiles: [api]
++   networks:
++     - frontend
++     - backend
+secrets:
+  app_secret:
+    file: ./secret.txt
+networks:
+  frontend:
+    driver: some-custom-driver1
+  backend:
+    driver: some-custom-driver2
+```
+
+## Handling Multiple Compose Files
+
+The full app code is [here](https://github.com/mythLabs/blog-content/tree/main/docker-compose/07.redis-app).
+
+For a complex microservice with multiple environments, we could possibly have multiple Compose files. To keep things `DRY` (Don't Repeat Yourself), we can use multiple different files together. We can create three types of relationships between them: `EXTEND`, `MERGE`, and `INCLUDE`.
+
+### Extend
+
+```diff-yaml:extend-compose.yaml
+services:
+  redis:
+    image: "redis:${REDIS_TAG}"
+    profiles: [webapp, api]
+```
+
+```diff-yaml:compose.yaml
+services:
+  web:
+    build: .
+    ports:
+      - "8000:5000"
+    environment:
+      - ENVKEY=DEV
+    secrets:
+      - app_secret
+    profiles: [webapp]
+    depends_on:
+      - redis
+    develop:
+      watch:
+        - action: rebuild 
+          path: server.py
+        - action: sync 
+          path: ./secret.txt
+          target: /run/secrets/app_secret
+  redis:
++   extends:
++     file: common-compose.yaml
++     service: redis
+  api:
+    image: "node:21-alpine3.18"
+    profiles: [api]
+secrets:
+  app_secret:
+    file: ./secret.txt
+```
+
+We create a new Compose file called common-compose.yaml and use configuration from it in our main Compose file.
+
+### Merge
+
+Docker Compose lets you merge and override a set of Compose files together to create a composite Compose file.
+
+By default, Compose reads two files: a compose.yml and an optional `compose.override.yml` file. By convention, the compose.yml contains your base configuration. The override file can contain configuration overrides for existing services or entirely new services.
+
+```diff-yaml:merge-compose.yaml
+services:
+  web:
+    build: .
+    ports:
+      - "8000:5000"
+    environment:
+      - ENVKEY=DEV
+      - LOGGER=FALSE
+```
+On running command:-  `docker compose -f compose.yaml -f merge-compose.yaml --env-file compose-env.txt --profile webapp up`
+
+The first file provided as input gets data from all the files after it and is merged into a single file that is used to create the environment.
+
+### Include
+
+With the `include` directive, you can include a separate full Compose file directly in your local Compose file.
+
+```diff-yaml:include-compose.yaml
++ include:
++   - extend-compose.yaml  #with redis declared
+services:
+  serviceA:
+    build: .
+    depends_on:
+      - redis #use redis directly as if it was declared in this Compose file
+```
+
+<strong>Thanks for reading!</strong>
