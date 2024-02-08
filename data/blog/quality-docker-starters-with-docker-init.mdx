@@ -1,0 +1,51 @@
+---
+title: 'Quality Docker Starters With Docker init'
+date: '2024-02-08'
+lastmod: '2024-02-08'
+tags: ['docker']
+draft: false
+summary: 'Lets use the new docker init commands to create great Dockerfile starters.'
+---
+
+# Introduction
+
+Although it was available as a beta release since `May of 2023`, last week the `docker init` command became `generally available` to everyone.
+
+The initial beta release of init came with support only for Go and generic projects. The latest version, available in [Docker Desktop 4.27](https://docs.docker.com/desktop/release-notes/#4270), supports `Go`, `Python`, `Node.js`, `Rust`, `ASP.NET`, `PHP`, and `Java`.
+
+`docker init` is a command-line utility designed to streamline the initialization of Docker resources within our project. This tool automates the creation of `Dockerfiles`,` Compose files`, and `.dockerignore` files, tailored to the specific requirements of your project. By intelligently analyzing the project's nature, it significantly minimizes setup time and simplifies Docker configurations, empowering you to focus more on development and less on infrastructure management.
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+# How to use it ?
+
+It's a very straightforward command; you navigate to the root of your project and run `docker init`.
+
+It will detect the language/framework based on the files and suggest that, but you can also choose any other option. I tried it for a Node.js project. Below is the result:
+
+![Docker init](/static/images/blog/quality-docker-starters-with-docker-init/01.png)
+
+Then it further narrows down to ask more questions about the project, as shown below.
+
+![Docker init final](/static/images/blog/quality-docker-starters-with-docker-init/02.png)
+
+Based on the inputs provided, it generated the following files:
+
+- .dockerignore
+- Dockerfile
+- compose.yaml
+- README.Docker.md
+
+You can check them out [here](https://github.com/mythLabs/blog-content/tree/main/docker-init). They follow all the best practices by default.
+
+You can find further examples with all the languages [here](https://docs.docker.com/engine/reference/commandline/init/#examples).
+
+# Why to use it ?
+
+It makes starting with the dockerization process is easier, more secure by default.
+
+It `eliminates the need to manually write Dockerfiles and other configuration files from scratch`, saving time and reducing the potential for errors. It's optimized for the specific type of application we are working on, ensuring that our project follows industry best practices.
+
+There is no excuse anymore to write basic, non-optimized Dockerfiles.
+
+<strong>Thanks for reading!</strong>
