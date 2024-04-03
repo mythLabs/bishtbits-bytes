@@ -1,1 +1,1 @@
-{"docker":4,"dockerfile":2,"net-core":1,"nodejs":1,"builds":1,"serverless":1,"aws-api-gateway":1,"aws-lambda-function":1,"webhooks":1,"avtl":1,"python":4,"packages":1,"pip":1,"pypi":1,"architecture":1,"docker-compose":1,"bestpractices":1,"loadtesting":1,"subprocess":1}
+{"python":4,"packages":1,"pip":1,"pypi":1,"architecture":1,"docker":4,"docker-compose":1,"subprocess":1,"loadtesting":1,"serverless":1,"aws-api-gateway":1,"aws-lambda-function":1,"webhooks":1,"avtl":1,"dockerfile":2,"net-core":1,"nodejs":1,"builds":1,"bestpractices":1}
