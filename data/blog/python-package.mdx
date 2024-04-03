@@ -1,0 +1,351 @@
+---
+title: 'Creating, deploying, and utilizing a Python package.'
+date: '2024-04-03'
+lastmod: '2024-04-03'
+tags: ['python', 'packages', 'pip', 'pypi']
+draft: false
+summary: 'Empower yourself by learning how to publish your code and share it with the world.'
+---
+
+# Introduction
+
+There are many common tasks involved in software development, such as implementing common logic or interacting with third-party APIs. These repetitive tasks can be `standardized and published as a module`, allowing us to assist others and enhance them through a community effort, known as open source software.
+
+So, let's learn how to publish a modularized piece of Python code that can be used by anyone. We will explore the basic building blocks of packages, known as `modules`, and how to create a package and publish it to the [Python Package Index (PyPI)](https://pypi.org/). Afterwards, we will download it and use it to complete the full cycle.
+
+All the source code from this blog is available [here](https://github.com/mythLabs/blog-content/tree/main/python-package).
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+# Modules Basics
+
+A [module](https://docs.python.org/3/tutorial/modules.html) is a file containing Python definitions and statements. The filename is the module name with the suffix `.py` appended. Within a module, the module's name (as a string) is available as the value of the global variable `__ name __`.
+
+Below is a simple Python module.
+
+```python:modu.py
+st = "John Snow is my favourite"
+arr = [123, 4, 56]
+
+def printer(arg):
+    print(f'arguments = {arg}')
+
+class InitTest:
+    pass
+```
+
+> This is a simple Python file containing variable declarations, functions, and class definitions. To test it out as a module, go into the Python command line and import 'modu'.
+
+<b>So, how do we use this module?</b>
+
+```python
+import modu
+```
+
+It does not make the content of the module directly accessible. Each module has a `private symbol table`, thus creating a separate `namespace`. So, upon importing `modu`, only `modu` is placed in the symbol table, and we can access content using `dot notation`.
+
+![modu import](/static/images/blog/python-package/01.png)
+
+There are multiple ways to import; some are discussed below.
+
+```python
+from modu import st
+```
+
+We can import a specific variable from the module. By directly adding `st` to the global symbol table, it becomes accessible without a module name. Anything else from the module is not recognized.
+
+![modu import](/static/images/blog/python-package/03.png)
+
+```python
+from modu import *
+```
+
+With *, we import everything from the module directly into the global symbol table.
+
+![modu import](/static/images/blog/python-package/04.png)
+
+```python
+from modu import st as fav
+```
+
+Using `as` allows us to create an alias for an imported symbol to counter any potential name collisions.
+
+![modu import](/static/images/blog/python-package/05.png)
+
+# Package Basics
+
+> Packages are a way of structuring Python's module namespace by using `dotted module names`.
+
+If we have a complex package with multiple features, imagine [boto3](https://pypi.org/project/boto3/) (AWS Python SDK). All its functions are created as separate modules, and all modules together create a package.
+
+Packages allow for a hierarchical structuring of the module namespace using dot notation. In the same way that modules help avoid collisions between global variable names, packages help avoid collisions between module names.
+
+
+Let's create a simple package with two modules.
+
+```python:modu1.py
+st = "jaime lannister is my favourite"
+arr = [123, 4, 56]
+
+def printer(arg):
+    print(f'arguments = {arg}')
+```
+
+```python:modu2.py
+st = "Tyrion Lannister is my favourite"
+arr = [123, 4, 56]
+
+def printer(arg):
+    print(f'arguments = {arg}')
+```
+
+Both of the above files are placed in a folder called `pack`, thus making it a package of modules.
+
+<b>So, how do we use this package?</b>
+
+```python
+import pack.modu1, pack.modu2
+```
+
+Since a package is a hierarchical structure, we can use dot notation to import a particular module from the package and use it.
+
+![package import](/static/images/blog/python-package/06.png)
+
+```python
+from pack.modu1 import st
+```
+
+We can also import a particular functionality from the package's module directly into the global symbol table.
+
+![package import](/static/images/blog/python-package/07.png)
+
+```python
+from pack.modu2 import st as say
+```
+
+Importing with an alias allows us to provide a different name for a module or its components when importing them.
+
+![package import](/static/images/blog/python-package/08.png)
+
+<b>__ init __.py</b>
+
+```python:__init__.py
+print(f'Initializing package name {__name__}')
+greatHouses = ['stark', 'Lannister' ]
+```
+
+When we import the package, if this file is present, it will be invoked. This can be used for the execution of package initialization code, like this.
+
+![package init](/static/images/blog/python-package/09.png)
+
+Initialized data can be further utilized in modules.
+
+```diff-yaml:modu1.py
+st = "jaime lannister is my favourite"
+arr = [123, 4, 56]
+
+def printer(arg):
+    print(f'arguments = {arg}')
+
++ def printRivals():
++   from pack import greatHouses
++   print(greatHouses)
+```
+
+![package init](/static/images/blog/python-package/10.png)
+
+
+# Directory structure of a package
+
+A package does not only contain modules; it also includes documentation, licenses, unit tests, package metadata, build instructions, and more.
+
+![directory structor](/static/images/blog/python-package/02.png)
+
+Let's understand what each file in the tree above is used for:
+
+- <b>package_name:</b> Represents the main package.
+- <b>docs:</b> It includes documentation files on how to use the package.
+- <b>scripts:</b> Top-level scripts.
+- <b>src:</b> Code goes here. It contains packages, modules, sub-packages, etc.
+- <b>tests:</b> Unit tests.
+- <b>LICENSE.txt:</b> Contains the text of the license.
+- <b>CHANGES.txt:</b> Log the changes of each release.
+- <b>MANIFEST.in:</b> Instructions on what extra files you want to include (non-code files).
+- <b>README.txt:</b> Contains the package description.
+- <b>pyproject.toml:</b> Register your build tools.
+- <b>setup.py:</b> Contains the build script for your build tools (existence depends on build tool).
+- <b>setup.cfg:</b> Configuration file of your build tools (existence depends on build tool).
+
+# Creating a basic package
+
+Now that we have some knowledge about packages, let's create one.
+
+Let's create a folder named [got_spoiler](https://github.com/mythLabs/blog-content/tree/main/python-package/03.create-package/got_spoiler/src/got_spoiler) containing two modules and an init file.
+
+```python:__init__.py
+print("Your IP address has been sent to a white walker !!!")
+```
+
+```python:death.py
+import random
+
+def can(name):
+    res = bool(random.getrandbits(1))
+    if res == True:
+        ep = random.randrange(1,9)
+        print(f"{name} is going to die in episode {ep}")
+    else:
+        print(f"By the grace of old gods, {name} will survive")
+```
+
+A module that randomly predicts whether your Game of Thrones character will die.
+
+![module death](/static/images/blog/python-package/11.png)
+
+```python:review.py
+def season(num):
+    if num >= 1 and num <= 5:
+        print("Epic")
+        return("Epic")
+    elif num == 6:
+        print("Great")
+    elif num == 7:
+        print("Mehh")
+    elif num == 8:
+        print("It does not exist")
+    else:
+        print("lol")
+```
+And this module reviews Game of Thrones seasons.
+
+So, this is the core of our package. Now, we need a bunch of supporting files.
+
+We need `unit test cases`.
+
+```python:test_spoilers_review.py
+import sys
+sys.path.append(r'./src')
+
+import unittest
+from spoilers import review 
+
+class TestReview(unittest.TestCase):
+
+	def test_review(self):
+		self.assertEqual(review.season(1),"Epic")
+
+unittest.main()
+```
+
+> We are appending our source code path thorugh sys.path while running this test to let the interpreter know from where to import our module.
+
+<b>run:</b> `python tests/test_spoilers_review.py`
+
+Now, add a `setup.cfg` file that contains all the metadata about the package; it's pretty much self-explanatory.
+
+```txt:setup.cfg
+[metadata]
+name = got_spoiler
+version = 1.0.0
+author = mythLabs
+author_email = amitbisht744@gmail.com
+description = A simple testing package
+long_description = file: README.md, LICENSE.txt
+long_description_content_type = text/markdown
+url = https://github.com/mythLabs
+project_urls =
+    Bug Tracker = https://github.com/mythLabs
+    repository = https://github.com/mythLabs
+classifiers =
+    Programming Language :: Python :: 3
+    License :: OSI Approved :: MIT License
+    Operating System :: OS Independent
+
+[options]
+package_dir =
+    = src
+packages = find:
+python_requires = >=3.6
+
+[options.packages.find]
+where = src
+```
+
+Now, to build this source, we will be using the Python package [setuptools](https://setuptools.pypa.io/en/latest/index.html), and we need a file named `pyproject.toml` to register the build system. There are multiple other build systems like [flit](https://flit.pypa.io/en/stable/) or [poetry](https://python-poetry.org/) that we would need to manipulate just these files.
+
+```txt:pyproject.tom
+[build-system]
+requires = ['setuptools>=42']
+build-backend = 'setuptools.build_meta'
+```
+
+At last, add a [README.md](https://github.com/mythLabs/blog-content/blob/main/python-package/03.create-package/got_spoiler/README.md) and [LICENSE.txt](https://github.com/mythLabs/blog-content/blob/main/python-package/03.create-package/got_spoiler/LICENSE.txt).
+
+Now, to build it, we first install the package [build](https://pypi.org/project/build/) and then run it.
+
+<b>run:</b> `python -m pip install --upgrade build`
+![install build](/static/images/blog/python-package/12.png)
+
+<b>run:</b> `python -m build`
+![run build](/static/images/blog/python-package/13.png)
+
+Now, we can see the distributables are generated in the /dist folder. The `.tar.gz` file is the source archive and the `.whl` file is the built archive. Both will be uploaded to the [Python Package Index](https://pypi.org/) and installed by package installer [pip](https://pypi.org/project/pip/).
+
+# Uploading the package
+
+Python packages are uploaded to the [Python Package Index (PyPI)](https://pypi.org/), but since we have to test our package, we will upload it to the [test version](https://test.pypi.org/) of the Python Package Index.
+
+First, we would need to create an account and obtain an API key to upload our package.
+
+- Go to [TestPyPI](https://test.pypi.org/) and create an account.
+- Go to 'api-tokens' and create your API token to securely upload your packages.
+  ![run build](/static/images/blog/python-package/14.png)
+- While creating, set the scope to 'entire account'.
+- Copy the token.
+
+Now, to upload it, we need a tool called [twine](https://pypi.org/project/twine/); it's the official PyPI upload tool.
+
+Now, let's go ahead and run these commands
+
+<b>run:</b> `python -m pip install --upgrade twine`
+
+<b>run:</b> `python -m twine upload --repository testpypi dist/*`
+
+![run build](/static/images/blog/python-package/15.png)
+
+And now you can see the uploaded package on the test index.
+
+[Link to package](https://test.pypi.org/project/got-spoiler/)
+
+# Using the installed package
+
+I created a file that uses our package.
+
+```python:usage.py
+from got_spoiler import death, review
+
+print(death.can("Ned Stark"))
+print(review.season(8))
+```
+So, we install the package now by running the command below:
+
+<b>run:</b> `pip install -i https://test.pypi.org/simple/got-spoiler`
+
+![run build](/static/images/blog/python-package/16.png)
+
+Now, we just run our 'usage.py'.
+
+<b>run:</b> `python usage.py`
+
+![run build](/static/images/blog/python-package/17.png)
+
+# Uploading to real python package index
+
+After the package testing is successful, we will upload it to the real index.
+
+- Go to [PyPI](https://pypi.org/) and create an account.
+- Run `python -m twine upload dist/*` in the terminal/command line; we don't need to specify the repository flag this time.
+- Enter the account credentials/API token you registered for on the actual PyPI.
+- Then, run pip install [package_name] to install your package.
+
+<strong>Thanks for reading!</strong>
