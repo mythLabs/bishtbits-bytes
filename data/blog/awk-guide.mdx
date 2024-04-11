@@ -1,0 +1,251 @@
+---
+title: 'AWK Guide'
+date: '2024-04-09'
+lastmod: '2024-04-09'
+tags: ['awk', 'linux']
+draft: false
+summary: 'Easy text processing with AWK'
+---
+
+# Introduction
+
+[AWK](https://en.wikipedia.org/wiki/AWK) syntax has always been a mystery to me, and I've done everything to avoid it. However, this weekend, I've made the decision to dive in and learn it.
+
+What on earth is AWK?
+
+AWK, a specialized language designed for text processing, is frequently utilized for tasks such as data extraction and report generation. Comparable to tools like `sed` and `grep`, AWK functions as a filter and is included as a standard component in many Unix-like operating systems.
+
+Although it is an established and fully featured programming language, in today's landscape, there exist multiple more advanced alternatives to AWK, making it primarily sought after for processing columnar data. However, if you frequently find yourself navigating through extensive datasets, AWK remains a valuable choice, capable of delivering efficient solutions with just a single line of command.
+
+# Source data
+
+This is the columnar data on which we will run awk commands.
+
+| FirstName      | LastName       |    Age	 |        Location	      |       KilledBy                                                                 |
+| -------------- | -------------- | -------- | ---------------------- | ------------------------------------------------------------------------------ |                                                                              
+| Ned            |    Stark       |    40	 |    King's-Landing      |     Beheaded-by-Ilyn-Payne                                                     |
+| Robb	         |    Stark       |    20	 |    The-Twins           |     Roose-Bolton                                                               |
+| Catelyn	     |    Stark       |    38	 |    The-Twins	          |   Killed-by-Black-Walder-and-Lothar-Frey                                       |
+| Joffrey	     |    Baratheon   |    17	 |    King's-Landing      |     Poisoned-by-Olenna-Tyrell                                                  |
+| Tywin	         |    Lannister   |    67	 |    King's-Landing      |     Shot-with-a-crossbow-by-Tyrion-Lannister                                   |
+| Renly	         |    Baratheon	  |    30	 |    Storm's-End	      |       Killed-by-a-shadow-creature-under-the-influence-of-Stannis-Baratheon     |
+| Stannis	     |    Baratheon	  |    42	 |    Winterfell	      |       Killed-by-Brienne-of-Tarth                                               |
+| Viserys	     |    Targaryen	  |    24	 |    Pentos              |     Molten-gold-poured-over-him-by-Khal-Drogo                                  |
+| Khal	         |    Drogo       |    32	 |    Vaes-Dothrak        |     Smothered-by-Daenerys-Targaryen                                            |
+| Oberyn	     |    Martell     |    40	 |    King's-Landing      |     Killed-by-Gregor-Clegane-in-a-trial-by-combat                              | 
+| Ygritte        |       -        |    22	 |    North-of-the-Wall	  |   Shot-with-an-arrow-by-Olly                                                   |     
+| Hodor	         |       -        |    42	 |    Beyond-the-Wall     |     Killed-by-White-Walkers-while-holding-the-door                             | 
+
+Write this data to a separate file, which can be named data.txt.
+
+# Command Structure
+
+This the basic structure of and awk command:-  
+
+```awk:awk
+awk 'BEGIN{code}/regex pattern/{action}END{code}' your_file_name.txt
+```
+
+> The BEGIN and END sections only run once, while the middle section runs once for each line in the file.
+
+Lets Start 
+
+
+```awk:awk
+awk 'BEGIN{printf "This is the start of data\n"} {print $0} END{printf "This is end of data\n"}' data.txt
+```
+
+> In the BEGIN and END sections, the print command runs only once, while print $0 prints every line
+![1](/static/images/blog/awk-guide/1.png)
+
+
+```awk:awk
+awk '{print $0}' data.txt
+```
+
+> We can use any of the three sections individually. In this example, we only use the middle one to print everything as is.
+![1](/static/images/blog/awk-guide/2.png)
+
+# Build-In Variables
+
+```awk:awk
+awk '{print NR,$0}' data.txt
+```
+> It represents the number of the current record. For example, in the above command, it prints the line number along with the data.
+![1](/static/images/blog/awk-guide/3.png)
+
+```awk:awk
+awk '{print NR "-" $1}' data.txt
+```
+
+> We can interpolate the print statement to change the output as we desire.
+![1](/static/images/blog/awk-guide/4.png)
+
+```awk:awk
+awk 'NR==2, NR==4 {print NR,$0}' data.txt 
+```
+> NR can also be used to print a particular line or lines.
+![1](/static/images/blog/awk-guide/5.png)
+
+```awk:awk
+awk '{print $NF}' data.txt
+```
+
+>It is a predefined variable whose value is the number of fields in the current record. Here, it prints the last column.
+![1](/static/images/blog/awk-guide/6.png)
+
+```awk:awk
+awk '{print FS}' data.txt
+```
+> It represents the input field separator, with its default value being space. You can also change this by using the -F command line option.
+
+```awk:awk
+awk 'BEGIN {print "Arguments =", ARGC}' One Two Three Four
+```
+
+> ARGC represents the argument count.
+![1](/static/images/blog/awk-guide/7.png)
+
+```awk:awk
+awk 'BEGIN {print ARGV[0],ARGV[1],ARGV[3]}' one two three
+```
+
+>ARGV is an array of command line arguments.
+![1](/static/images/blog/awk-guide/8.png)
+
+```awk:awk
+awk 'BEGIN { print ENVIRON["USER"] }'
+```
+>It is an array of environment variables.
+![1](/static/images/blog/awk-guide/9.png)
+
+```awk:awk
+awk 'END {print FILENAME}' data.txt
+``` 
+>It represents the current file name.
+![1](/static/images/blog/awk-guide/10.png)
+
+```awk:awk
+awk 'BEGIN { if (match("One Two Three", "re")) { print RLENGTH } }'
+```
+
+>Match is a predefined function that searches for a given string in the input string, and RLENGTH stores the length of the search string or pattern.
+![1](/static/images/blog/awk-guide/11.png)
+
+# Common Usage
+
+```awk:awk
+awk '{print $1}' data.txt
+```
+> We can choose which column to display with `$1`, `$2`, and so on. If no delimiter is provided, it will use space by default.
+![1](/static/images/blog/awk-guide/12.png)
+
+```awk:awk
+awk '{print $3}' data.txt
+```
+![1](/static/images/blog/awk-guide/13.png)
+
+```awk:awk
+awk '{print $1 "\t" $3}' data.txt
+```
+>We can do interpolation to make the output prettier.
+![1](/static/images/blog/awk-guide/14.png)
+
+```awk:awk
+awk '{print $1}' data.txt | head -2
+```
+
+>The result of an awk command can be piped into other commands to create complex logic.
+![1](/static/images/blog/awk-guide/15.png)
+
+```awk:awk
+awk '/^O/' data.txt
+```
+> Regular expressions can be added between slashes (/), and each line will get matched with it. The caret (^) is used to match the starting letter in any line.
+![1](/static/images/blog/awk-guide/16.png)
+
+```awk:awk
+awk '/n$/' data.txt
+```
+
+>"$" is used to match the ending letter in any line.
+![1](/static/images/blog/awk-guide/17.png)
+
+```awk:awk
+awk '! /n$/' data.txt
+```
+> "!" is the negation (opposite) of any match.
+![1](/static/images/blog/awk-guide/18.png)
+
+
+```awk:awk
+awk '/Landing/{print $1, $3}' data.txt
+``` 
+
+> Data that is matched with the regular expression is further manipulated and displayed with a print block.
+![1](/static/images/blog/awk-guide/19.png)
+
+```awk:awk
+awk -f  awk-src.txt data.txt 
+```
+
+```awk:awk-src.txt
+$3 > 30 { print $0 }
+```
+
+> AWK is a programming language. We have been using its ad-hoc style commands for text manipulation, but for bigger, multiline logics, we can store the code in a separate file and pass that file with the -f parameter.
+![1](/static/images/blog/awk-guide/20.png)
+
+```awk:awk
+awk 'length($0) > 100' data.txt
+```
+> Length is a predefined function that gives the length of data, and we can apply conditionals to it. In the above example, lines having more than 100 characters get printed.
+![1](/static/images/blog/awk-guide/21.png)
+
+
+```awk:awk
+awk '{ if (length($0) > max) max = length($0) } END { print max }' data.txt
+```
+> We can also use full-fledged conditional logic with 'if' here. In the above example, the 'if' block will run for every line to get the maximum length, and the 'END' block will only run once at the end to print the maximum value.
+![1](/static/images/blog/awk-guide/22.png)
+
+
+```awk:awk
+awk '{ if($2 == "Baratheon") print $0;}' data.txt
+```
+>With this trick, we can also find particular data in a specific column and print those rows.
+![1](/static/images/blog/awk-guide/23.png)
+
+
+```awk:awk
+awk 'BEGIN { for(i=1;i<=6;i++) print "square of", i, "is",i*i; }'
+```
+>AWK also provides us with looping capabilities.
+![1](/static/images/blog/awk-guide/24.png)
+
+
+```awk:awk
+awk -v name=Barry 'BEGIN{printf "Name = %s\n", name}'
+```
+> We can also pass variables from the outside execution environment into the AWK command. For example, if we run AWK through a shell script.
+![1](/static/images/blog/awk-guide/25.png)
+
+```awk:awk
+awk -f  sum.txt 2 5
+```
+
+```txt:sum.txt
+function sum(n1, n2) {
+    res = n1 + n2
+    print "Sum =", res
+}
+
+BEGIN {
+   sum(ARGV[1], ARGV[2])
+}
+```
+
+> We can pass arguments into AWK code. Here, we have a function to print the sum of two numbers called from the BEGIN section. We pass 2 and 4 into the AWK code and perform their sum.
+![1](/static/images/blog/awk-guide/26.png)
+
+<strong>Thanks for reading!</strong>
