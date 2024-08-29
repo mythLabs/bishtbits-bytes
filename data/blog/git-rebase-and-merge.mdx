@@ -1,0 +1,129 @@
+---
+title: 'Git Rebase and Merge'
+date: '2024-08-29'
+lastmod: '2024-08-29'
+tags: ['git']
+draft: false
+summary: 'Easily learn how to push your changes the right way.'
+---
+
+# Introduction
+
+This article is not about choosing between `git merge` and `git rebase`, as both have their strengths and are essential in a workflow to achieve the best results.
+
+Both rebase and merge share a common purpose: helping us collaborate by providing ways to share our code with other contributors using Git. 
+While their goal is the same, the methods they employ are different. Understanding when to use each can save us from unnecessary complexities.
+
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+# Git Rebase
+    Let's tackle the difficult one first.
+    
+    Rebasing is more challenging because the possibility of something going wrong is higher.
+
+    Here is our current starting branch structure.
+    ![Docker image size large](/static/images/blog/git-rebase-and-merge/s1.png)
+
+    > This is the history of our main branch, from commit A to commit D.
+
+    ![Docker image size large](/static/images/blog/git-rebase-and-merge/s2.png)
+
+    > This is the history of our feature branch.
+    
+    As you can see, before commit `A`, we have commit `C`. This means that commits A to C are from the main branch `(check the hashes in both screenshots)`. 
+    
+    The feature branch was created when the main branch's last commit was C. The subsequent commits, A and B, are from the feature branch.
+
+    To keep our feature branch updated with the latest changes from the main branch (in the above case, commit D), we should `rebase our feature branch`. 
+
+
+```git:git
+git checkout feature-branch
+git rebase main
+```
+    ![Docker image size large](/static/images/blog/git-rebase-and-merge/s3.png)
+
+    As we can see, we now have a new commit from the main branch in our repository with the correct historical sequence. With a merge, the situation would have been different, but we'll discuss that later.
+
+    Rebasing is a destructive operation because it rewrites commit history. By applying your commits on top of a different base, you are changing the commit hashes `(compare the screenshots)` and effectively altering the existing commit history. 
+    
+    This makes rebasing riskier compared to merging , which does not alter existing commits but rather integrates changes in a way that preserves the original commit history.
+
+While rebasing can lead to a cleaner, more linear commit history, it should be used with caution, especially in collaborative environments. Since it changes existing commits, it can complicate things if those commits have already been shared with others.
+    
+    Therefore, `it is recommended to use rebase only if your changes have not been pushed to a remote repository yet.`. 
+    
+    <strong>For example</strong>, if commits A and B have already been pushed to the remote with their original commit hashes, and your local branch does not include these commits, pushing your changes can create various issues. This is because your local history will differ from the remote history, leading to potential conflicts and complexities when synchronizing.
+
+    Ideally, you should `always rebase your feature branch onto the main branch, and avoid rebasing the main branch with the feature branch`.
+
+    With this workflow, you can pull changes and maintain a clean history. Now, it's time to push changes to the main branch.
+# Git Merge 
+    As the name suggests, `merging` is used to combine changes from one branch into another. However, there are two types of merges.
+
+    1. <strong>Fast-forward Merge:</strong>
+
+        Here is our current starting branch structure (pretty much self-explanatory.).
+
+        ![Docker image size large](/static/images/blog/git-rebase-and-merge/s4.png)
+        > base branch
+
+        ![Docker image size large](/static/images/blog/git-rebase-and-merge/s5.png)
+        >feature branch
+
+        In simple terms, if there have been no new changes in the main branch since we created or rebased the feature branch, merging the feature branch into the main branch will simply move the pointer of the main branch to the tip of the feature branch. This is effectively a `fast-forward` merge, where the main branch’s history is updated to include the commits from the feature branch.
+        
+
+        ```git:git
+        git checkout main
+        git merge feature-branch
+        ```
+
+        We can see that Git indicates it is a fast-forward merge.
+
+        As a result, we get a clean commit history: <strong> THIS IS WHAT WE ALWAYS WANT </strong>
+        ![Docker image size large](/static/images/blog/git-rebase-and-merge/s6.png)
+
+    2. <strong>Three-way Merge:</strong>
+        
+        Here is our current starting branch structure
+
+        ![Docker image size large](/static/images/blog/git-rebase-and-merge/s7.png)
+        >base branch
+
+        ![Docker image size large](/static/images/blog/git-rebase-and-merge/s8.png)
+        >feature branch
+
+        This a common scenario, the main branch is ahead of feature with commit D, and we want to merge our feature branch. Running git merge feature-branch creates what is often referred to as a `merge commit`.
+
+        ```git:git
+        git checkout main
+        git merge feature-branch
+        ```
+
+        ![Docker image size large](/static/images/blog/git-rebase-and-merge/s9.png)
+        <strong>This merge commit is an additional commit that involves three parties:</strong>
+
+        - The head of the main branch
+        - The head of the feature branch
+        - A new head for the merge commit
+
+        This state appears in many histories and can be an eyesore, often resulting in a complex commit history. When many developers are frequently merging code, it can lead to a large number of these additional, unnecessary commits, further complicating the history.
+
+        Therefore, it is preferable to perform a fast-forward merge whenever possible.
+
+        Imagine a git history with only actual, readable commits—beautiful.
+
+        <strong>So always, rebase your feature branch regularly, and once you’re done, perform the merge.</strong>
+
+<strong>Thanks for reading!</strong>
+
+
+
+
+
+
+
+    
+
