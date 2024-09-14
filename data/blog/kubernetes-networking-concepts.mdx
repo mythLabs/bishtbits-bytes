@@ -183,7 +183,7 @@ minikube start --network-plugin=cni --cni=calico
       ![k8s nodeport](/static/images/blog/kubernetes-networking-concepts/p6.png)
       When using NodePort, the source IP is translated to the node's IP, so network policies for the pods can't see the original client IP. This means policies can only filter traffic based on the destination protocol and port, not the client IP. 
       
-      To keep the original client IP, you can use externalTrafficPolicy, or use Calico's eBPF dataplane, which handles services natively without kube-proxy, preserving the client IP.
+      To keep the original client IP, you can use **externalTrafficPolicy**, or use **Calico's eBPF dataplane**, which handles services natively without kube-proxy, preserving the client IP.
 
       ```yaml:nodeport-service.yaml
       apiVersion: v1
@@ -206,7 +206,7 @@ minikube start --network-plugin=cni --cni=calico
       ![k8s Loadbalancer](/static/images/blog/kubernetes-networking-concepts/p7.png)
       Although most NLBs preserve the client’s source IP, the traffic goes through a NodePort, which means the backing pods cannot see the client IP. This affects network policies similarly to NodePort services. 
       
-      To retain the client IP, configure externalTrafficPolicy or use Calico’s eBPF dataplane, which bypasses kube-proxy and preserves the source IP.
+      To retain the client IP, configure **externalTrafficPolicy** or use **Calico’s eBPF dataplane**, which bypasses kube-proxy and preserves the source IP.
       ```yaml:loadbalancer-service.yaml
       apiVersion: v1
       kind: Service
@@ -236,7 +236,7 @@ minikube start --network-plugin=cni --cni=calico
     - **Ingress Controller:** Manages Ingress resources by configuring load balancing, routing, and SSL/TLS termination. **Examples** include **NGINX, Traefik, HAProxy**, and cloud-specific controllers like **AWS ALB** or **Google Cloud Load Balancer**.
     - **Ingress Load Balancer:** Configured by the Ingress Controller to manage traffic based on defined rules. It terminates client connections, inspects requests, and forwards them to the appropriate service in the cluster.
 
-    Ingresss is generally installed using HELM but i'll talk about HELM in another blog, so i'll use yaml directly to install nginx-ingress.
+    Ingress is generally installed using **HELM** but i'll talk about HELM in another blog, so i'll use yaml directly to install nginx-ingress.
 
     ```
     kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
@@ -334,7 +334,7 @@ for example, pods)
 
   Using a **Calico GlobalNetworkPolicy** can simplify this by avoiding the need to create policies for each new namespace. You can also include exceptions, such as allowing DNS access.
 
-  For example, you can use the following policy to default-deny all pod traffic except DNS queries to kube-dns/CoreDNS:
+  **For example,** you can use the following policy to default-deny all pod traffic except DNS queries to kube-dns/CoreDNS:
   ```yaml:calico-network-policy.yaml
     apiVersion: projectcalico.org/v3
     kind: GlobalNetworkPolicy
@@ -360,7 +360,7 @@ for example, pods)
         - protocol: UDP
           port: 53
   ```
-  *As you can judge from kind and apiVersion, this type of policy is available only if ew use calico as CNI*
+  *`As you can judge from kind and apiVersion, this type of policy is available only if we use calico as CNI`*
 
 
 # DNS in Kubernetes
