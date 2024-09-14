@@ -1,0 +1,415 @@
+---
+title: 'Kubernetes networking concepts'
+date: '2024-09-14'
+lastmod: '2024-09-14'
+tags: ['kubernetes']
+draft: false
+summary: 'Learn what powers this beast.'
+---
+
+# Introduction
+
+**Kubernetes networking** ensures seamless communication between containers, services, and users within and outside the cluster, enabling connectivity across distributed environments for orchestrated containerized applications.
+
+This blog explores how Kubernetes manages networking and its key components and requires some prior knowledge of Kubernetes and its workloads.
+
+*In this blog i will be using [minikube](https://minikube.sigs.k8s.io/docs/start/?arch=%2Fwindows%2Fx86-64%2Fstable%2F.exe+download) to setup a single node cluster as it [supports calico CNI](https://docs.tigera.io/calico/latest/getting-started/kubernetes/minikube) too.*
+*yamls can be found on [my github](https://github.com/mythLabs/blog-content/tree/main/kubernetes-networking-concepts).*
+
+Starting minikube kubernetes cluster with below command enables calico as CNI.
+```
+minikube start --network-plugin=cni --cni=calico
+```
+
+![k8s architecture](/static/images/blog/kubernetes-networking-concepts/p1.png)
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+
+# Kubernetes Networking: The 'flat network'
+   The Kubernetes networking model follows these key principles:
+    - Every pod is assigned its own IP address.
+    - Containers within the same pod share the IP address and can communicate with each other seamlessly.
+    - All pods in a cluster can communicate with each other directly using pod IP addresses, without requiring [Network Address Translation (NAT)](https://en.wikipedia.org/wiki/Network_address_translation).
+    - Network policies are used to isolate and control communication between pods.
+
+  This model treats each pod similarly to a **virtual machine (VM)**, where the processes inside the VM resemble containers within a pod. This parallel helps in planning the migration of applications to Kubernetes.
+
+  This Kubernetes networking design is often referred to as a **"flat network,"** where all pods can communicate directly across the cluster without the need for NAT, complex routing, or hierarchical subnetting. 
+  
+  By assigning each pod a unique IP address that is reachable cluster-wide, this design simplifies communication and removes traditional network complexities like IP masquerading. This flat networking model supports the scalable orchestration of containerized applications.
+
+  > Unique IPs assigned by calico
+    ![overlay architecture](/static/images/blog/kubernetes-networking-concepts/p9.png)
+
+# Kube-Proxy: Service-Level Networking
+    It is a critical networking component in Kubernetes responsible for managing network traffic within a cluster.
+    Key functions:
+      - **Service Load Balancing:** It helps distribute traffic to the correct backend for services and operates at **Layer 4**, dealing with IP and port.
+      - **Network Traffic Routing:** A kube-proxy component runs on every node. It ensures that when traffic is sent to a service's virtual IP **(ClusterIP)**, it is routed to one of the pods associated with that service.
+      - It updates routing rules in real time as pods are scheduled or removed from the node.
+
+    > Kube-proxy pod deployed
+    ![overlay architecture](/static/images/blog/kubernetes-networking-concepts/p10.png)
+
+# Container Network Interface (CNI)
+    It is a specification for building libraries that configure networking for container runtimes.
+    
+    A CNI plugin is responsible for setting up **network interfaces in containers and configuring IP addresses, routing, DNS, and other network-related settings**. The CNI specification defines how container runtimes (like Docker, Kubernetes) should integrate with networking plugins, ensuring that container network setups are modular and pluggable.
+
+    #### Why do we need it
+      - **Pod Networking:** CNI plugins handle the network setup for each pod. This includes assigning IP addresses to pods and ensuring pods can communicate with each other as well as external networks.
+      - **Modular and Extensible:** Kubernetes is designed to support various networking solutions via the CNI interface. Users can choose from several CNI-compatible plugins, such as [Calico](https://www.tigera.io/project-calico/), [Flannel](https://github.com/flannel-io/flannel), [Cilium](https://cilium.io/) or [azure-cni](https://learn.microsoft.com/en-us/azure/aks/concepts-network-cni-overview), based on their networking requirements (e.g., policy enforcement, security, scalability).
+      - **Network Policy Enforcement:** Some plugins, like Calico, not only handle pod networking but also enforce network policies to control traffic between pods, services, and external networks. This ensures security and compliance in multi-tenant environments.
+
+    > Calico pods deployed
+    ![overlay architecture](/static/images/blog/kubernetes-networking-concepts/p11.png)
+
+# kube-proxy VS CNI 
+
+    | Feature    | CNI | Kube-proxy
+    | -------- | ------- | ------- |
+    | **Responsibility**  | Configures pod network interfaces and IPs | Manages traffic routing and load balancing between services and pods |
+    | **Level of Operation** | Pod-level networking (IP assignment, routing) | Service-level networking (routing traffic to services) |
+    | **Layer of Operation**    | Layer 3 (IP addressing and routing)    | Layer 4 (Transport layer, IP and port-based routing) |
+    | **Handles Traffic**    | Pod-to-pod communication    | Service-to-pod and external-to-service communication |
+    | **Network Isolation**    | Manages network namespaces for pods    | Provides no network isolation but routes traffic via IP tables or IPVS |
+    | **Plugins**    | Pluggable (Calico, Flannel, Weave, etc.)    | Core Kubernetes component, not pluggable |
+
+# Overlay Networks in Kubernetes
+  An Overlay Network in Kubernetes is a virtual network that allows pods to communicate as if they are on the same subnet, even when they are spread across different nodes or subnets. 
+  
+  It runs on top of the physical or host network by encapsulating pod traffic within the underlying network packets, enabling seamless communication between pods across nodes. Each pod is assigned a unique IP address, and the overlay network abstracts the complexity of the physical network, ensuring connectivity between all pods regardless of node location.
+
+  ![overlay architecture](/static/images/blog/kubernetes-networking-concepts/p2.png)
+
+  #### How it works
+    - When a pod on one node wants to communicate with a pod on another node, the overlay network encapsulates the traffic with an additional header (e.g., VXLAN) and sends it over the physical network.
+    - Upon reaching the destination node, the overlay network removes the additional header and delivers the packet to the target pod as if both pods were on the same network.
+    - This process creates a virtual, flat network across nodes, abstracting the underlying physical infrastructure and simplifying networking complexities.
+
+
+# Kubenet: A Basic CNI Plugin
+  Kubenet is a basic network plugin used by Kubernetes to manage pod networking and is one of the default networking implementations in Kubernetes clusters. It provides essential connectivity for pods but has limited functionality compared to advanced Container Network Interface (CNI) plugins like Calico or Flannel.
+
+  #### Key Features
+    - **Pod-to-Pod Communication:** Kubenet assigns IP addresses to pods and facilitates direct communication between pods on the same node. For inter-node communication, it uses Network Address Translation [(NAT)](https://en.wikipedia.org/wiki/Network_address_translation) to route traffic.
+    - **Overlay Networking:** It creates an overlay network with a CIDR block for each node, allowing direct communication between pods on the same node while routing traffic between nodes through the overlay network.
+    - **Bridge and veth Pairs:** Kubenet uses a Linux bridge for local networking and virtual Ethernet (veth) pairs to connect pods to the bridge, providing each pod with a virtual network interface.
+    - **IP Tables for Traffic Routing:** IP table rules are set up to forward traffic between the node's network and the pod's network and to manage inter-node communication using NAT.
+
+  #### Advantages
+    - **Simplicity:** Kubenet is lightweight and easy to set up, making it suitable for smaller or less complex clusters where advanced features are not required.
+    - **Basic Pod Networking:** It provides fundamental pod-to-pod communication without the need for complex CNI plugins.
+    - **Compatibility:** Kubenet works across various Kubernetes environments, especially where advanced networking features like network policies or encryption are not needed.
+
+  #### Limitations
+    - **No Support for Network Policies:** Kubenet does not support network policies, limiting the ability to control or restrict traffic between pods or nodes.
+    - **Scalability:** It is less suitable for large clusters or complex environments due to its reliance on NAT for inter-node communication, which can become inefficient as the cluster grows.
+    - **No Encryption:** Traffic between pods is not encrypted with Kubenet, making it less suitable for security-sensitive environments where encryption is needed.
+    - **Less Control over Networking:** Kubenet offers fewer options for customizing the networking stack compared to more advanced CNI plugins.
+
+# Calico: An Advance CNI Plugin
+  [Calico](https://www.tigera.io/project-calico/) is a popular Container Network Interface (CNI) plugin for Kubernetes that provides advanced networking features, network security, and policy enforcement. It is widely used in production environments due to its flexibility, scalability, and powerful capabilities beyond basic networking.
+  
+  ![calico logo](/static/images/blog/kubernetes-networking-concepts/p3.png)
+  
+  #### Advantages
+        - **Network Policy Enforcement:** Calico supports detailed Kubernetes NetworkPolicies for controlling traffic based on IPs, ports, and protocols, enabling a zero-trust security model.
+        - **High Performance and Scalability:** Utilizes native **Layer 3** routing for better performance and lower latency compared to overlay networks. Integrates with BGP for direct routing across large networks or multi-cloud setups, and is optimized for large clusters.
+        - **Security Features:** Enforces security policies at both pod and node levels, extends security based on workload identity, and supports encryption for secure communication.
+        - **Integration with Service Meshes:** Works well with service meshes like Istio, managing **Layer 3** and **Layer 4** networking while Istio handles **Layer 7** traffic, providing a comprehensive solution for microservice communication and security.
+  
+# Kubenet vs calico
+
+    | Feature    | Calico | Kubenet
+    | -------- | ------- | ------- |
+    |**Networking Model**|L3 routing with optional overlays (IP-in-IP, VXLAN)|Uses basic Linux bridge and veth pair setup with NAT for pod-to-pod communication|
+    |**Network Policies**|Supports fine-grained Kubernetes NetworkPolicies for security|No support for network policies; limited to basic networking|
+    |**Scalability**|Highly scalable, designed for large clusters with thousands of nodes and pods|Suitable for small, less complex clusters; can struggle with large-scale environments|
+    |**Performance**|High performance with native L3 routing; can use BGP for optimal routing|Uses NAT, which introduces overhead and is less efficient for large clusters|
+    |**Cross-Node Communication**|Uses L3 routing (or encapsulation like VXLAN) to route traffic between nodes|Relies on Network Address Translation (NAT) for inter-node communication|
+    |**Observability and Monitoring**|Provides detailed flow logs, metrics, and integration with monitoring tools like Prometheus|Limited to basic IP tables setup; lacks built-in monitoring or logging features|
+    |**Security Features**|Supports encryption, workload identity, and host protection|Lacks built-in security features or traffic encryption|
+    |**Use of Overlays**|Can work with or without overlays|Uses NAT without overlays|
+    |**Multi-Cloud/Hybrid Support**|Excellent support for multi-cloud and hybrid environments using BGP and advanced routing|Not designed for multi-cloud or complex hybrid network setups|
+    |**Encryption**|Can provide encrypted traffic between nodes or across networks|No support for encryption between nodes|
+  
+  #### When to Use Each
+    - **Calico:** Choose Calico if you need a scalable, production-grade network solution with network policies, security, and performance, especially in large or hybrid cloud environments.
+    - **Kubenet:** Opt for Kubenet when working with small or simple Kubernetes clusters, where ease of setup is a priority and advanced networking features like policies or encryption are not needed.
+
+# Services
+    Kubernetes Services provide a way of abstracting access to a group of pods as a network service. The group of pods 
+    backing each service is usually defined using a label selector
+    ![k8s services](/static/images/blog/kubernetes-networking-concepts/p4.png)
+
+    There are three main types of Kubernetes services:
+      - **Cluster IP:** which is the usual way of accessing a service from inside the cluster
+      - **Node port:** which is the most basic way of accessing a service from outside the cluster
+      - **Load balancer:** which uses an external load balancer as a more sophisticated way to access a service from
+      outside the cluster.
+
+    #### Cluster IP
+      The default service type is ClusterIP. This allows a service to be accessed within the cluster via a virtual IP address,
+      known as the service Cluster IP. The Cluster IP for a service is discoverable through Kubernetes DNS.
+      ![k8s clusterip](/static/images/blog/kubernetes-networking-concepts/p5.png)
+      **For example**, the DNS name `my-svc.my-namespace.svc.cluster-domain.example` and Cluster IP address remain constant for the lifetime of a service, even as the backing pods are created or destroyed and their numbers change.
+
+      In a typical Kubernetes deployment, kube-proxy runs on every node, handling connections to Cluster IP addresses and load balancing across the pods backing each service. 
+      
+      It uses **DNAT (Destination Network Address Translation)** to map the Cluster IP to the selected pod. Response packets then undergo reverse NAT to return to the pod that initiated the connection.
+
+      ```yaml:clusterIP-service.yaml
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: nginx-service
+      spec:
+        selector:
+          app: nginx
+        ports:
+        - protocol: TCP
+          port: 80
+          targetPort: 80
+        type: ClusterIP
+      ```
+
+    #### Node port services:
+      A NodePort in Kubernetes reserves a port on each node to enable external access to services. kube-proxy manages these connections, distributing traffic across the pods behind the service. 
+      
+      It uses Network Address Translation (NAT) to map the node's IP and port to the service's pod and port, and translates the source IP from the client to the node IP, ensuring response traffic returns through the same node to reverse the NAT.
+      
+      ![k8s nodeport](/static/images/blog/kubernetes-networking-concepts/p6.png)
+      When using NodePort, the source IP is translated to the node's IP, so network policies for the pods can't see the original client IP. This means policies can only filter traffic based on the destination protocol and port, not the client IP. 
+      
+      To keep the original client IP, you can use externalTrafficPolicy, or use Calico's eBPF dataplane, which handles services natively without kube-proxy, preserving the client IP.
+
+      ```yaml:nodeport-service.yaml
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: nginx-service
+      spec:
+        selector:
+          app: nginx
+        ports:
+        - protocol: TCP
+          port: 80
+          targetPort: 80
+          nodePort: 30007  # Optional: specify a custom NodePort (range: 30000-32767)
+        type: NodePort
+      ```
+
+    ####  Load balancer services:
+      Services of type LoadBalancer use an external network load balancer (NLB) to expose Kubernetes services. The NLB, which varies by cloud provider or hardware, assigns a dedicated IP to the service and distributes traffic across nodes using the service’s NodePort.
+      ![k8s Loadbalancer](/static/images/blog/kubernetes-networking-concepts/p7.png)
+      Although most NLBs preserve the client’s source IP, the traffic goes through a NodePort, which means the backing pods cannot see the client IP. This affects network policies similarly to NodePort services. 
+      
+      To retain the client IP, configure externalTrafficPolicy or use Calico’s eBPF dataplane, which bypasses kube-proxy and preserves the source IP.
+      ```yaml:loadbalancer-service.yaml
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: nginx-service
+      spec:
+        selector:
+          app: nginx
+        ports:
+        - protocol: TCP
+          port: 80
+          targetPort: 80
+        type: LoadBalancer
+      ```
+
+# Ingress in Kubernetes
+
+  Kubernetes Ingress extends Kubernetes Services to provide **application-layer (Layer 7) load balancing**, directing HTTP and HTTPS requests based on domains or URLs to specific services. Ingress can also handle SSL/TLS termination before routing traffic to the services.
+  ![k8s ingress](/static/images/blog/kubernetes-networking-concepts/p8.png)
+  Ingress implementation relies on the Ingress Controller, which manages Ingress resources and configures the necessary load balancers to handle traffic. Unlike **Kubernetes services that operate at the network layer (L3-4), ingress load balancers function at the application layer (L5-7)**, inspecting HTTP/HTTPS requests. 
+  
+  Since the load balancer terminates incoming connections, traffic to service pods is forwarded through new connections, meaning network policies can only restrict access to the load balancer, not the original clients.
+
+  #### How Ingress Works
+
+    - **Ingress Resource:** A Kubernetes API object defining routing rules to specify which services receive traffic based on incoming requests.
+    - **Ingress Controller:** Manages Ingress resources by configuring load balancing, routing, and SSL/TLS termination. **Examples** include **NGINX, Traefik, HAProxy**, and cloud-specific controllers like **AWS ALB** or **Google Cloud Load Balancer**.
+    - **Ingress Load Balancer:** Configured by the Ingress Controller to manage traffic based on defined rules. It terminates client connections, inspects requests, and forwards them to the appropriate service in the cluster.
+
+    Ingresss is generally installed using HELM but i'll talk about HELM in another blog, so i'll use yaml directly to install nginx-ingress.
+
+    ```
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+    ```
+
+    > A bunch of resources are created.
+    ![overlay architecture](/static/images/blog/kubernetes-networking-concepts/p12.png)
+
+    > A controller pod is created.
+    ![overlay architecture](/static/images/blog/kubernetes-networking-concepts/p13.png)
+
+    Now we can create a ingress config to traffic direction.
+
+    ```yaml:ingress-conf.yaml
+    apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: example-ingress
+      namespace: default
+      annotations:
+        nginx.ingress.kubernetes.io/rewrite-target: /
+    spec:
+      rules:
+      - host: example.com
+        http:
+          paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nginx-service
+                port:
+                  number: 80
+    ```
+
+# Egress in Kubernetes
+
+  Unlike ingress traffic, Kubernetes lacks a dedicated Egress resource to manage outgoing traffic. Instead, `egress handling is determined by the network implementation or CNI plugin in use`, and can be further influenced by a service mesh if one is deployed.
+
+  There are two key aspects of egress traffic management to consider when selecting a networking or service mesh solution:
+
+    - **Restricting egress traffic**: Controlling which external destinations can be accessed from within the cluster.
+    - **Egress gateways**: Dedicated nodes or proxies that centralize and control outbound traffic.
+
+  #### Restricting egress traffic
+
+  Restricting outgoing connections from a Kubernetes cluster is achieved using Network Policy, which defines egress rules and often employs a default deny policy. Policies need to specify external resources by IP addresses, which can change, requiring updates. This limitation can be addressed using Calico Network Sets or domain name support in **Calico Enterprise**.
+
+  Service meshes, like Istio, can also control external access, with Calico integrating to enforce network policies. 
+
+  ### Egress gateways
+    Egress gateways route all outbound traffic through one or more gateways, performing SNAT so external services see traffic as coming from the gateway. This enhances security by consolidating connections through known IP addresses and integrating with perimeter firewalls. 
+    
+    Egress gateways are not native to Kubernetes but are provided by some network implementations and service meshes, like Calico Enterprise, which also allows mapping namespaces or pods to specific gateways for better security control.
+
+# Network Policies
+
+Network policy is the primary tool for securing a Kubernetes network. It allows you to easily restrict the network traffic in
+your cluster so only the traffic that you want to flow is allowed.
+
+The main features of Kubernetes network policies are:
+  - Policies are namespace scoped (i.e. you create them within the context of a specific namespace just like,
+for example, pods)
+  -  Policies are applied to pods using label selectors
+  - Policy rules can specify the traffic that is allowed to/from other pods, namespaces, or CIDRs
+  - Policy rules can specify protocols (TCP, UDP, SCTP), named ports or port numbers
+
+  ```yaml:network-policy.yaml
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: allow-frontend-to-backend
+    namespace: default
+  spec:
+    podSelector:
+      matchLabels:
+        app: backend
+    policyTypes:
+    - Ingress
+    ingress:
+    - from:
+      - podSelector:
+          matchLabels:
+            app: frontend
+  ```
+
+  *above policy only allows traffic into pods with backend label from pods with frontend label.*
+
+  > Network-policy is created.
+  ![overlay architecture](/static/images/blog/kubernetes-networking-concepts/p14.png)
+
+
+   #### Default deny approach
+  To ensure best practices, you can define default deny network policies. These policies block all traffic to/from a pod unless explicitly allowed by another policy. This approach forces teams to define network policies for new pods.
+
+  Using a **Calico GlobalNetworkPolicy** can simplify this by avoiding the need to create policies for each new namespace. You can also include exceptions, such as allowing DNS access.
+
+  For example, you can use the following policy to default-deny all pod traffic except DNS queries to kube-dns/CoreDNS:
+  ```yaml:calico-network-policy.yaml
+    apiVersion: projectcalico.org/v3
+    kind: GlobalNetworkPolicy
+    metadata:
+      name: default-app-policy
+    spec:
+      namespaceSelector:
+        matchExpressions:
+        - key: projectcalico.org/name
+          operator: NotIn
+          values:
+          - kubesystem
+          - calico-system
+      types:
+      - Ingress
+      - Egress
+      egress:
+      - action: Allow
+        protocol: UDP
+        destination:
+          selector: k8s-app == "kube-dns"
+        ports:
+        - protocol: UDP
+          port: 53
+  ```
+  *As you can judge from kind and apiVersion, this type of policy is available only if ew use calico as CNI*
+
+
+# DNS in Kubernetes
+
+DNS in Kubernetes, managed primarily by **CoreDNS**, provides essential functionality for service discovery and internal communication. It allows services and pods to resolve and connect to each other using DNS names, facilitating dynamic and scalable network communication within the cluster.
+
+### CoreDNS
+CoreDNS is the default DNS server in Kubernetes (replacing kube-dns). It provides DNS-based service discovery and name resolution within the cluster.
+Configuration: CoreDNS is configured via a ConfigMap called coredns in the kube-system namespace. This configuration can be customized to meet specific needs.
+
+ - **Service DNS Names** Kubernetes automatically creates DNS records for services. The DNS format for a service is `<service-name>.<namespace>.svc.cluster.local`. For example, a service named my-service in the default namespace would have the DNS name `my-service.default.svc.cluster.local`.
+ - **Pod DNS Names:** Pods can be addressed by their DNS names, which follow the format `<pod-ip-address>.<namespace>.pod.cluster.local`. However, this is less commonly used than service DNS names.
+ - **Service Discovery:** Pods and services use DNS names to discover and connect to other services. When a service is created, Kubernetes updates CoreDNS with the service’s DNS record.
+ - **Internal Communication:** Within a Kubernetes cluster, applications can use DNS names to communicate with other services. For instance, an application can connect to a database service using its DNS name rather than an IP address.
+
+> code-dns pods deployed.
+  ![overlay architecture](/static/images/blog/kubernetes-networking-concepts/p15.png)
+
+  Now lets try to access a service with its dns name.
+  
+  > We have two deployments of nginx, one in default namespace and other in app namespace.
+  ![overlay architecture](/static/images/blog/kubernetes-networking-concepts/p16.png)
+
+  We will try to connect to nginx pod in app namespace from nginx pod in default namespace.
+
+  > We exec inside nginx pod and perform a curl request to another pod with DNS format url and get result as nginx's index pages.
+  ![overlay architecture](/static/images/blog/kubernetes-networking-concepts/p17.png)
+
+
+# Multi-Cluster Networking in Kubernetes
+
+Multi-Cluster Networking in Kubernetes involves connecting and managing multiple Kubernetes clusters to enable communication and workload distribution across them. Here’s a brief overview:
+
+#### Key Concepts
+  - **Inter-Cluster Communication:** Facilitates communication between services or applications running in different Kubernetes clusters. This can be achieved through various methods, including network overlays, VPNs, or service mesh technologies.
+
+  - **Service Discovery:** Services in one cluster need to discover and connect to services in another cluster. Solutions often involve using global DNS or service mesh features that provide cross-cluster service discovery.
+
+  - **Network Overlays:** Technologies like CNI plugins (e.g., Calico, Cilium) or service meshes (e.g., Istio, Linkerd) extend networking capabilities across clusters, allowing pods to communicate as if they were in the same cluster.
+
+  - **Egress and Ingress:** Managing traffic between clusters requires handling egress (outbound traffic) and ingress (inbound traffic) effectively. This might involve setting up external load balancers or gateways to route traffic between clusters.
+
+  - **Security and Policy:** Ensuring secure communication between clusters involves configuring firewalls, network policies, and encryption. Tools like Calico and Istio can enforce security policies across clusters.
+
+### Use Cases
+  - **Disaster Recovery:** Multi-cluster setups can enhance resilience by distributing workloads across clusters in different geographic locations, providing high availability and disaster recovery capabilities.
+
+  - **Geographic Distribution:** Deploying applications closer to users by leveraging clusters in different regions or countries to reduce latency and improve performance.
+
+  - **Resource Optimization:** Distributing workloads across clusters to balance resource utilization and manage costs effectively.
+
+<strong>Thanks for reading!</strong>
