@@ -134,7 +134,7 @@ Here's a detailed guide to understanding the lifecycle and components involved o
     > The api runs fine
 
 
-    -  **Iteration 2:** Set up an Nginx reverse proxy in front of the API to handle traffic on port 80.
+    -  **Iteration 2:** Set up an Nginx reverse proxy in front of the API to handle traffic on port **80**.
         ![iteration 2](/static/images/blog/ssl-lifecycle-components/2.drawio.png)
 
     ```yaml:docker-compose.yaml
@@ -199,7 +199,7 @@ Here's a detailed guide to understanding the lifecycle and components involved o
     ![rev proxy](/static/images/blog/ssl-lifecycle-components/p5.png)
     > The API is served on port 80. [If we don’t specify a port in the URL and use HTTP, the browser automatically defaults to port 80 for the request.]
 
-    - **Iteration 3:** Next, we'll make our API accessible on port 443.
+    - **Iteration 3:** Next, we'll make our API accessible on port **443**.
 
       ![iteration 3](/static/images/blog/ssl-lifecycle-components/3.drawio.png)
 
@@ -297,7 +297,7 @@ Here's a detailed guide to understanding the lifecycle and components involved o
 
       - **Iteration 3 on server:** We will now deploy our API to an EC2 server using actual SSL certificates.
 
-        In the last example, we created certificates ourselves. However, to do it correctly, we need certificates provided by a **certificate authority (CA)**. We create certificate files ourselves, then generate a **certificate signing request (CSR)** for the CA. After signing the files, the CA authorizes them for use after confirming that we actually own the domain.
+        **In the last example**, we created certificates ourselves. However, to do it correctly, we need certificates provided by a **certificate authority (CA)**. We create certificate files ourselves, then generate a **certificate signing request (CSR)** for the CA. After signing the files, the CA authorizes them for use after confirming that we actually own the domain.
 
         We will use the free certificate authority known as **Let's Encrypt**. The process of obtaining the certificate is streamlined by using **Certbot**. 
         
@@ -312,17 +312,18 @@ Here's a detailed guide to understanding the lifecycle and components involved o
           > Nothing is currently being served on this IP.
 
 
-        - Lets start by setting up DNS.
+        - **Lets start by setting up DNS.**
           I own the domain of this blog website, **amitbrewscode.in**, so I will map the subdomain **api.amitbrewscode.in** to the public IP.
           ![subdomain](/static/images/blog/ssl-lifecycle-components/subd.png)
 
           ![nslook up](/static/images/blog/ssl-lifecycle-components/p12.png)
           
 
-        - Install docker on ec2
+        - **Install docker on ec2**
+           
            https://docs.docker.com/engine/install/ubuntu/
 
-        - Setup Code and run 
+        - **Setup Code and run**
 
           ```yaml:docker-compose:docker-compose.yaml
               services:
@@ -352,10 +353,13 @@ Here's a detailed guide to understanding the lifecycle and components involved o
         > Default nginx page served on 80
 
 
-        - Install certbot
-          Certbot is a powerful and user-friendly tool that automates the process of obtaining and renewing SSL/TLS certificates from Let's Encrypt, a free certificate authority. Designed to simplify the deployment of HTTPS, Certbot handles domain validation, certificate issuance, and renewal, allowing website owners to secure their sites with minimal effort. By using Certbot, you can easily set up a secure connection for your web applications, ensuring data integrity and confidentiality for your users.
+        - **Install Certbot**
 
-        - Setup nginx, certbot containers
+            **Certbot** is a powerful and user-friendly tool that automates the process of obtaining and renewing SSL/TLS certificates from Let's Encrypt, a free certificate authority. 
+            
+            Designed to simplify the deployment of HTTPS, Certbot handles domain validation, certificate issuance, and renewal, allowing website owners to secure their sites with minimal effort. By using Certbot, you can easily set up a secure connection for your web applications, ensuring data integrity and confidentiality for your users.
+
+        - **Setup nginx, certbot containers**
 
           Before requesting certificates, we need to do the following:
             - A common folder/volume needs to be shared by the Certbot and Nginx containers, as Certbot will write the challenge file and the Nginx container will serve that file.
