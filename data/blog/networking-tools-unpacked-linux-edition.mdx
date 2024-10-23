@@ -1,0 +1,161 @@
+---
+title: 'Networking Tools Unpacked: Linux Edition'
+date: '2024-10-23'
+lastmod: '2024-10-23'
+tags: ['linux', 'troubleshooting', 'tools', 'networking']
+draft: false
+summary: 'Discover essential Linux networking tools and troubleshooting techniques to enhance your skills and resolve issues effectively.'
+---
+
+# Introduction
+
+Here are some essential commands that can be helpful for debugging network-related issues in Linux environments, along with common scenarios for their use.
+
+# Docker Image
+
+I have created a public, multiplatform Docker image that includes all the necessary tools. 
+
+It is available on [Docker Hub](https://hub.docker.com/repository/docker/amit0myth/networking-toolset/general).
+```shell:Usage
+docker run -it amit0myth/networking-toolset:v2 sh
+```
+
+```dockerfile:dockerfile
+# Use Alpine as the base image
+FROM alpine:latest
+
+# Install necessary packages
+RUN apk update && apk add --no-cache \
+    iproute2  \    
+    net-tools \     
+    iputils \             
+    traceroute \                      
+    lsof \                
+    tcpdump \             
+    curl \                
+    wget  \          
+    busybox-extras \      
+    netcat-openbsd \      
+    nmap \                
+    bind-tools \          
+    iperf3 \              
+    iptables
+
+# Default command
+CMD ["sh"]
+```
+
+# Commands
+
+- **ip**
+
+   >The ip command is used to manage network interfaces, routing, and tunnels. It can display network configurations such as IP addresses, manage routes, and configure network devices.
+   - **Scenario 1**: A computer can't access other devices on the same network. Use `ip addr` show to check if the network interface has a valid IP address and confirm if it’s active (up).
+   - **Scenario 2**: The system is unable to access the internet due to routing issues. Use `ip route` to check if the default gateway is correctly set and routes are properly configured.
+   ![ip](/static/images/blog/networking-tools-unpacked-linux-edition/p1.png)
+- **ifconfig**
+   
+   >ifconfig is used to configure or display network interface parameters (IP address, subnet mask, etc.). It’s mostly deprecated and replaced by the ip command but still used in some systems.
+   - **Scenario 1**: A server isn't responding to network requests. Use `ifconfig` to verify whether the network interface is up and has a valid IP address.
+   - **Scenario 2**: A network card is having issues connecting to the local network. Use `ifconfig eth0 down` followed by `ifconfig eth0 up` to restart the interface and reinitialize the connection.
+   ![ifconfig](/static/images/blog/networking-tools-unpacked-linux-edition/p2.png)
+- **ping**
+   
+   >ping sends ICMP echo requests to a target to check network connectivity and response time. It's used for testing the reachability of a host on an IP network.
+   - **Scenario 1**: A user can’t access a website. Use `ping <hostname>` to check if the server is reachable and if any packet loss occurs.
+   - **Scenario 2**: A machine can't connect to the local network. Use `ping <gateway IP>` to test if the machine can communicate with the local router.
+   ![ping](/static/images/blog/networking-tools-unpacked-linux-edition/p3.png)
+
+- **traceroute**
+   
+   >traceroute shows the path packets take to reach a destination, displaying each hop and the delay between them. It helps identify where network delays or failures occur.
+   - **Scenario 1**: A website is accessible but very slow. Use `traceroute <hostname>` to identify which hop in the network route is causing the delay.
+   - **Scenario 2**: You’re unable to reach a remote server. Use `traceroute <IP address>` to check where the connection is failing, such as a specific router or firewall.
+   ![traceroute](/static/images/blog/networking-tools-unpacked-linux-edition/p4.png)
+- **netstat**
+   
+   >netstat displays active network connections, listening ports, routing tables, and interface statistics. It’s helpful for diagnosing open connections and services.
+   - **Scenario 1**: A web server isn’t responding on port 80. Use `netstat -tuln` to verify if the web server is listening on port 80 and accepting connections.
+   - **Scenario 2**: A machine is suspected of having a malicious process sending data. Use `netstat -p` to identify active connections and associate them with running processes.
+   ![netstat](/static/images/blog/networking-tools-unpacked-linux-edition/p5.png)
+- **ss**
+   
+   >ss is a more modern and faster alternative to netstat. It provides detailed information about network sockets and connections.
+   - **Scenario 1**: A service on port 443 (HTTPS) is not responding. Use `ss -ltn` to check if port 443 is open and being listened to by the correct service.
+   - **Scenario 2**: The system has too many established connections. Use `ss -s` to summarize socket connections and identify potential bottlenecks or overuse.
+   ![ss](/static/images/blog/networking-tools-unpacked-linux-edition/p6.png)
+- **lsof**
+
+   >lsof lists open files, including network files (sockets). It’s commonly used to find which process is using a specific port.
+   - **Scenario 1**: Port 8080 is in use, and you need to find which process is occupying it. Use `lsof -i :8080` to see the process ID.
+   - **Scenario 2**: A service is failing to start because another process is using its port. Use `lsof -i :80` to identify the conflicting process.
+   ![lsof1](/static/images/blog/networking-tools-unpacked-linux-edition/p7.png)
+   ![lsof2](/static/images/blog/networking-tools-unpacked-linux-edition/p8.png)
+- **tcpdump**
+
+   >tcpdump is a packet analyzer that captures and analyzes network traffic. It’s useful for monitoring packets on a network interface and diagnosing connectivity issues.
+   - **Scenario 1**: You suspect a Denial-of-Service (DoS) attack on your server. Use `tcpdump -i eth0` to capture incoming traffic and analyze the source of suspicious activity.
+   - **Scenario 2**: A specific application is failing to communicate with an external API. Use `tcpdump -i eth0 port 443` to capture and examine HTTPS traffic between your server and the API.
+   ![tcpdump](/static/images/blog/networking-tools-unpacked-linux-edition/p9.png)
+- **curl**
+
+   >curl transfers data from or to a server using various protocols like HTTP, HTTPS, FTP, and more. It's commonly used for testing API endpoints or downloading files.
+   - **Scenario 1**: You need to verify if an API endpoint is responsive. Use `curl http://api.example.com` to send a request and check the response.
+   - **Scenario 2**: A user reports issues with a website’s SSL certificate. Use `curl -v https://example.com` to see detailed SSL handshake information and diagnose certificate problems.
+   ![curl](/static/images/blog/networking-tools-unpacked-linux-edition/p10.png)
+- **wget**
+    
+    >wget is used to download files from the web via HTTP, HTTPS, and FTP. It supports recursive downloading and is often used in scripts for automated file downloads.
+    - **Scenario 1**: Users report slow download speeds from a server. Use `wget http://example.com/file.zip` to test the download and compare the speed.
+    - **Scenario 2**: You need to troubleshoot whether a website is available. Use `wget http://example.com` to download the page and verify availability.
+   ![wget](/static/images/blog/networking-tools-unpacked-linux-edition/p11.png)
+- **telnet**
+    
+   >telnet connects to remote devices via raw TCP connections, typically used to troubleshoot if a port is open on a remote host.
+    - **Scenario 1**: A web server is unresponsive on port 80. Use `telnet <hostname> 80` to manually test if the port is open and accepting connections.
+    - **Scenario 2**: An email server isn’t working on port 25 (SMTP). `Use telnet <hostname> 25` to test if the mail server is accepting SMTP connections.
+    ![telnet](/static/images/blog/networking-tools-unpacked-linux-edition/p12.png)
+- **netcat (nc)**
+    
+   >netcat (nc) is a networking utility used for port scanning, creating raw connections, and testing services. It can also send or receive data over TCP or UDP.
+    - **Scenario 1**: A service on port 8080 isn’t responding. Use `nc -zv <hostname>` 8080 to test if the port is open and accepting connections.
+    - **Scenario 2**: You need to transfer a file between two machines over the network. Use nc to establish a raw connection and send the file through it.
+   ![netcat](/static/images/blog/networking-tools-unpacked-linux-edition/p13.png)
+- **nmap**
+    
+    >nmap is a network scanner used to discover hosts, open ports, and services running on a network. It can also perform vulnerability assessments.
+    - **Scenario 1**: A remote server is not responding. Use `nmap <hostname>` to scan the server’s ports and see which services are running.
+    - **Scenario 2**: You suspect a firewall is blocking specific services. Use `nmap -Pn <hostname>` to perform a stealth scan and check for any blocked ports.
+
+- **dig**
+
+   >dig is a DNS lookup tool used to query DNS servers and retrieve DNS records like A, MX, or TXT records. It’s useful for troubleshooting DNS-related issues.
+   - **Scenario 1**: Users can’t access a website. Use `dig example.com` to check if the domain resolves to the correct IP address and ensure DNS resolution is working.
+   - **Scenario 2**: Email delivery is failing. Use `dig MX example.com` to verify if the mail server records are correctly configured.
+   ![dig](/static/images/blog/networking-tools-unpacked-linux-edition/p14.png)
+- **nslookup**
+    
+   >nslookup is a simpler tool for querying DNS servers to resolve domain names into IP addresses. It can query different DNS types like A, MX, and NS records.
+    - **Scenario 1**: A website isn’t reachable. Use `nslookup example.com` to check if DNS is resolving the domain name to the correct IP address.
+    - **Scenario 2**: DNS resolution issues are suspected in a network. Use nslookup with a specific DNS server (e.g., `nslookup example.com 8.8.8.8`) to test DNS propagation.
+   ![nslookup](/static/images/blog/networking-tools-unpacked-linux-edition/p15.png)
+
+- **iperf**
+    
+    >iperf is a tool used to measure network bandwidth between two hosts. It can assess network throughput, packet loss, and jitter.
+    - **Scenario 1**: Users report slow network speeds between two locations. Use `iperf -c <server>` to test the available bandwidth between the two points.
+    - **Scenario 2**: A network upgrade has been performed, and you want to test the new network’s performance. Use iperf to measure the bandwidth between devices in different network segments.
+   ![iperf1](/static/images/blog/networking-tools-unpacked-linux-edition/p16.png)
+   ![iperf2](/static/images/blog/networking-tools-unpacked-linux-edition/p17.png)
+- **iptables**
+    
+    >iptables is a Linux utility for managing firewall rules, allowing you to filter and control network traffic. It’s used to allow or block incoming and outgoing traffic.
+    - **Scenario 1**: A service isn't accessible because it's being blocked by the firewall. Use `iptables -L` to list all firewall rules and identify blocking rules.
+    - **Scenario 2**: You want to block all incoming traffic except SSH. Use `iptables -A INPUT -p tcp --dport 22 -j ACCEPT` followed by a rule to drop other traffic.
+
+- **firewalld**
+    >firewalld is a firewall management tool that offers a more flexible way to manage firewall rules compared to iptables, with zones and runtime configurations.
+    - **Scenario 1**: A new service is being blocked by the firewall. Use `firewall-cmd --list-all` to view the firewall rules in the active zone and see if it needs to be allowed.
+    - **Scenario 2**: After adding a new server, users can't access it. Use `firewall-cmd --add-port=8080/tcp --permanent` to open port 8080 in the firewall and allow access.
+
+<strong>Thanks for reading!</strong>
