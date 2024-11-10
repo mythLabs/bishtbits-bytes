@@ -1,0 +1,389 @@
+---
+title: 'Mastering Linux Services'
+date: '2024-11-10'
+lastmod: '2024-11-10'
+tags: ['linux']
+draft: false
+summary: 'A concise guide to creating, managing, and optimizing systemd services for efficient Linux administration.'
+---
+
+# Introduction
+**Linux services**, often referred to as `daemons`, are background processes that run independently to perform essential tasks, such as managing hardware or handling network requests. 
+
+Traditionally managed with **init scripts**, many modern distributions use `systemd`, which provides a flexible framework for service management through unit files.
+We will be using `systemd`.
+
+Services can operate in various states `(active, inactive, or failed)` and can be configured with resource limits and dependencies. 
+
+Code Ref: https://github.com/mythLabs/blog-content/tree/main/mastering-linux-services
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+# Creating a basic service
+
+  - Create a custom shell script that will be run as a service.
+  ```shell:log_message.sh
+  #!/bin/bash
+
+  while true; do
+      echo "Hello from the custom service! at $(date)" >> /home/amit/personal/blog-content/mastering-linux-services/log_message.log
+      sleep 10  # Wait for 10 seconds
+  done
+  ```
+ - Make the file executable.
+ ```shell
+  # Grants execute permissions to the /log_message.sh script.
+  sudo chmod +x /log_message.sh
+ ```
+
+ - Create the systemd service file.
+      ```shell 
+      sudo vi /etc/systemd/system/custom_logger.service
+      ```
+
+      ```shell:custom_logger.service
+      [Unit]
+      Description=Custom Shell Logger Service
+
+      [Service]
+      ExecStart=/home/amit/personal/blog-content/mastering-linux-services/log_message.sh
+      User=amit
+
+      [Install]
+      WantedBy=multi-user.target
+      ```
+
+      ![service file created](/static/images/blog/mastering-linux-services/p1.png)
+
+      - [Unit]
+          ```
+          Description=Custom Shell Logger Service
+          ```
+          >This line provides a brief description of the service, which helps users and system administrators understand its purpose.
+
+      -  [Service]
+          ```
+          ExecStart=/home/amit/personal/blog-content/mastering-linux-services/log_message.sh
+          ```
+          >This line specifies the command that will be executed when the service starts. It points to the script log_message.sh, which contains the logic for the logging functionality.
+          
+          ```
+          User=amit
+          ```
+          >This directive indicates that the service will run with the privileges of the specified user (amit). Running services as a non-root user is a security best practice that minimizes potential damage if the service is compromised.
+      
+      - [Install]
+          ```
+          WantedBy=multi-user.target
+          ```
+          >This line defines the target under which the service should be started when enabled. The multi-user.target is a standard runlevel for non-graphical multi-user environments.
+      
+    
+ - Make systemd aware of the update.
+    ```shell
+    sudo systemctl daemon-reload
+    ```
+ - Start the service. 
+    ```shell
+    sudo systemctl start custom_logger
+    ```
+  - Check status of the service.
+    ```shell
+    sudo systemctl status custom_logger
+    ```
+    ![started service](/static/images/blog/mastering-linux-services/p2.png)
+
+    ![log file](/static/images/blog/mastering-linux-services/p3.png)
+ 
+
+# Source code change management
+
+What happens to a running service if you update the executable or configuration?
+
+- **Updating the Service File:**
+  
+  If you make changes to the service file, you need to run `systemctl daemon-reload`. This command tells systemd to reload its configuration and apply any changes made to the service definition.
+
+- **Updating the executable:**
+  
+  If you update the .sh script without restarting the service, the changes won’t take effect immediately. `The currently running service instance will continue using the old version of the script until you restart it`.
+  
+  Here's what happens in this scenario:
+    - `Running Instance:` The existing service instance will continue running with the original version of the script that was loaded when the service started.
+    - `Pending Changes:` Any modifications to the .sh file will only be applied when the service is restarted (either via `systemctl restart` or by stopping and starting it again).
+    - `Long-Running Services:` For services running indefinitely (like daemons), changes will not take effect until you manually restart the service. 
+    
+        For services that stop and start regularly (e.g., triggered by timers or user actions), the updates will be applied the next time the service starts.
+
+# Advance configuration options
+
+#### [Unit] Section
+  - `After=:` Specifies that the service should start only after the specified units have started. This is useful for managing dependencies between services.
+  - `Requires=:` Indicates that the specified units must be active for this service to start. If the required unit fails or is stopped, this service will also be stopped.
+  - `Wants=:` Similar to **Requires=**, but the specified units are not strictly required for this service to start. This allows for softer dependencies.
+  - `ConditionPathExists=:` The service will only start if the specified path exists. This can be useful for conditional execution.
+
+#### [Service] Section
+  - `Type=:` Defines how the service is started. Common types include:
+      - `simple:` The default; assumes the service is a long-running process.
+      - `forking:` Used for services that fork a child process and exit the parent.
+      - `oneshot:` For one-time tasks; the service is considered started immediately and does not need to remain active.
+      - `notify:` For services that will send a notification message to systemd after startup.
+  - `ExecReload=:` Specifies a command to execute when the service is reloaded. This is useful for services that can be gracefully reloaded without needing to be stopped and restarted.
+  - `Restart=:` Controls the service restart behavior. Possible values include:
+      - `no:` Do not restart the service (default).
+      - `on-failure:` Restart only if the service exits with a non-zero status.
+      - `always:` Always restart the service regardless of exit status.
+      - `on-abort:` Restart only if the service terminates due to an unhandled signal.
+      - `TimeoutStartSec=:` Specifies the time to wait for the service to start before considering it failed. If the service does not start in this time, it will be terminated.
+      - `TimeoutStopSec=:` Specifies the time to wait for the service to stop gracefully before forcibly terminating it.
+  - `User=:` Specifies the user under which the service runs, providing a way to run services with reduced privileges.
+  - `Group=:` Similar to User=, but specifies the group under which the service runs.
+  - `Environment=:` Allows you to define environment variables that will be available to the service when it runs.
+  - `StandardOutput=:` Controls where the standard output of the service goes. 
+      
+      Options include:
+      - `journal:` Send output to the journal.
+      - `null:` Discard output.
+      - `tty:` Send output to the controlling terminal.
+      - `StandardError=:` Similar to StandardOutput=, but for standard error output.
+
+#### [Install] Section
+  - `Alias=:` Creates an alias for the service. This can be useful for providing a simpler name for a service that has a more complex name.
+  - `WantedBy=:` targets are a way to group units and manage the startup sequence of services. They can be thought of as a logical grouping of services that should be started together. Common targets include `multi-user.target, graphical.target, reboot.target`, and many others.
+
+```shell
+[Unit]
+Description=Advanced Custom Logger Service
+After=network.target
+Requires=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/amit/logs
+ExecStart=/home/amit/scripts/log_message.sh
+User=amit
+Environment=LOG_LEVEL=debug
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=10s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+
+# Triggering the service 
+In **systemd**, services can be triggered to start in various ways, based on different events or conditions. 
+
+Here are some of the most common trigger mechanisms:
+
+- `Target-Based Triggers`
+    - `WantedBy and RequiredBy:` These directives in the **[Install]** section of the service file specify the target units that should start this service when the target is reached.
+        - `WantedBy=multi-user.target:` The service will start when the system reaches the multi-user mode.
+        - `RequiredBy=some.target:` The service cannot start unless the specified target is active.
+- `Dependency Triggers`
+    - `After= and Before=:` Specify order dependencies between services. A service defined with After= will start only after the specified service has started, while **Before=** ensures it starts before the specified service.
+    - `Requires= and Wants=:` These create dependencies, where **Requires=** specifies that the service cannot start unless the required service is active, while Wants= is a softer requirement.
+
+- `Timer Triggers`
+    - `Timers:` Instead of cron jobs, you can use systemd timers to trigger services at scheduled intervals.
+              Timer units have a **.timer** extension and specify when to start the associated service.
+              
+              `Example:` A timer unit that starts a backup service every hour.
+              
+              ```shell
+              [Timer]
+              OnCalendar=*-*-* 00:00:00
+              ```
+- `Path Triggers`
+    - `PathUnits:` These can be used to monitor filesystem events. When a specified file or directory is modified, created, or deleted, a service can be triggered.
+      
+      `Example:` A service can be set to start when a specific configuration file is modified.
+      
+      ```shell
+      [Path]
+      PathChanged=/etc/custom_service/config.conf
+      ```
+- `Socket Activation`
+    - `Socket Units:` **systemd** can create socket units that listen for incoming connections. When a connection is received, the associated service is started automatically.
+      This is common in server applications where the service does not need to be running until it receives a request.
+      
+      ```shell
+      [Socket]
+      ListenStream=8080
+      ```
+- `Notification-Based Triggers`
+    - `Type=notify:` Services that use this type can send a notification to systemd when they are fully started. This allows systemd to wait for the service to be fully operational before proceeding with dependent services.
+- `Manual Triggers`
+    - `Manual Start/Stop:` Services can be started or stopped manually using systemctl commands `(e.g., systemctl start myservice)`. This is often used during development or testing.
+
+
+# Managing Service state
+ A service's state can be managed using the following commands as needed:
+
+```shell
+# Displays the current status of the custom_logger service, including whether it is active, inactive, or failed.
+sudo systemctl status custom_logger
+```
+
+```shell
+# Starts the custom_logger service.
+sudo systemctl start custom_logger
+```
+
+```shell
+# Stops the custom_logger service.
+sudo systemctl stop custom_logger
+```
+
+```shell
+# Restarts the custom_logger service.
+sudo systemctl restart custom_logger
+```
+
+```shell
+# Reloads the configuration of the custom_logger service without stopping it.
+sudo systemctl reload custom_logger
+```
+
+```shell
+# Enables the custom_logger service to start automatically on boot.
+sudo systemctl enable custom_logger
+```
+
+```shell
+# Disables the custom_logger service from starting automatically on boot.
+sudo systemctl disable custom_logger
+```
+
+```shell
+# Checks if the custom_logger service is enabled to start automatically on boot.
+sudo systemctl is-enabled custom_logger
+```
+
+![is enabled](/static/images/blog/mastering-linux-services/p4.png)
+
+```shell
+# Lists all active systemd services currently running on the system.
+sudo systemctl list-units --type=service --state=active
+```
+
+# Logging with journalctl
+
+`journalctl` is a command-line tool used to view logs collected by systemd's journal service, allowing you to access system and service logs.
+
+```shell 
+# Displays the logs for the custom_logger service.
+sudo journalctl -u custom_logger
+```
+
+![logs](/static/images/blog/mastering-linux-services/p5.png)
+
+```shell 
+# Follows the logs of the custom_logger service in real-time.
+sudo journalctl -u custom_logger -f
+```
+
+```shell 
+# Displays the logs for the custom_logger service since November 1, 2024, at 12:00 PM.
+sudo journalctl -u custom_logger --since "2024-11-01 12:00:00"
+```
+
+# Using Environment Variables
+
+ ```shell:custom_logger.service
+[Unit]
+Description=Custom Shell Logger Service
+
+[Service]
+ExecStart=/home/amit/personal/blog-content/mastering-linux-services/log_message.sh
+User=amit
+
+EnvironmentFile=/custom_service.env
+
+[Install]
+WantedBy=multi-user.target
+ ```
+
+```shell 
+# Sets the file permissions of /etc/custom_service.env to be readable and writable by the owner, and readable by others.
+chmod 644 /etc/custom_service.env
+```
+
+ ```shell
+ # Shows the environment variables set for the custom_logger service.
+ sudo systemctl show custom_logger --property=Environment
+```
+
+# Resource Control
+
+Resource control allows you to manage and limit the resources (CPU, memory, I/O, etc.) that a service can use. This is particularly useful when you want to prevent a single service from consuming too many system resources and affecting the overall performance of your server.
+
+- Resource Control Directives
+    These are the most common directives you can use in a service file to control resources:
+
+    - `CPU Limits:`
+      - `CPUQuota=`: Limit the CPU usage of a service as a percentage of a single CPU. For example, CPUQuota=50% means the service can use up to 50% of one CPU core.
+      - `CPUShares=:` Controls the relative weight of CPU time a service gets compared to others. Higher values mean more CPU time.
+
+    - `Memory Limits:`
+      - `MemoryLimit=:` Sets the maximum amount of RAM a service can use. For example, MemoryLimit=500M restricts the service to use up to 500 MB of memory.
+
+    - `I/O Limits:`
+      - `IOReadBandwidthMax=:` Limits the maximum read bandwidth for a service (e.g., IOReadBandwidthMax=/dev/sda 10M).
+      - `IOWriteBandwidthMax=:` Limits the maximum write bandwidth for a service.
+    - `Task Limits:`
+      - `TasksMax=:` Sets the maximum number of tasks (threads or processes) that a service can create.
+
+ ```shell:custom_logger.service
+[Unit]
+Description=Custom Shell Logger Service
+
+[Service]
+ExecStart=/home/amit/personal/blog-content/mastering-linux-services/log_message.sh
+User=amit
+
+CPUQuota=50%
+CPUShares=1024
+MemoryLimit=1G
+
+[Install]
+WantedBy=multi-user.target
+ ```
+
+ ```shell 
+ # Displays the CPU quota, memory limit, and maximum number of tasks for the custom_service service.
+ sudo systemctl show custom_service -p CPUQuota,MemoryLimit,TasksMax
+```
+
+# Service Types
+
+The `Type` directive in the `[Service]` section specifies how systemd should start and manage a service. 
+
+```shell:custom_logger.service
+[Unit]
+Description=Custom Shell Logger Service
+
+[Service]
+Type=simple
+ExecStart=/home/amit/personal/blog-content/mastering-linux-services/log_message.sh
+User=amit
+
+
+[Install]
+WantedBy=multi-user.target
+ ```
+
+ | **Service Type** | **Behavior**                                                                                     | **Use Case**                     |
+|------------------|--------------------------------------------------------------------------------------------------|----------------------------------|
+| `simple`         | Starts the service and considers it active immediately.                                          | Foreground processes             |
+| `forking`        | Waits for the service to fork and exit the parent process before marking it active.              | Traditional Unix daemons         |
+| `oneshot`        | Runs a command once and exits, usually with `RemainAfterExit=yes`.                               | Initialization tasks             |
+| `notify`         | Waits for a notification from the service to indicate readiness.                                 | Complex startup services         |
+| `dbus`           | Waits for the service to acquire a specific D-Bus name.                                          | D-Bus services                   |
+| `idle`           | Delays service startup until all other jobs have finished during boot.                           | Non-critical services            |
+
+<strong>Thanks for reading!</strong>
