@@ -1,0 +1,291 @@
+---
+title: 'Process Management in Linux'
+date: '2024-11-27'
+lastmod: '2024-11-27'
+tags: ['linux']
+draft: false
+summary: 'Learn the utilities provided by linux to debug system performance'
+---
+
+# Introduction
+
+Managing processes efficiently is at the heart of any operating system, and Linux excels in providing robust tools and features for process management. Whether you're an administrator troubleshooting system performance or a developer optimizing an application, understanding Linux's process management is crucial. 
+
+This blog will dive into the lifecycle of Linux processes, explain key concepts, and showcase essential commands and tools. 
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+# What is a Process in Linux?
+In Linux, a process is an instance of a running program. It encompasses everything needed to execute the program, including its code, data, heap, and stack. Each process is uniquely identified by a **Process ID (PID)**, which is crucial for managing and controlling it.
+
+# Key Process Types
+
+    - `Foreground Processes:` These processes run directly in the shell and require user interaction. For example, when you run vim to edit a file, it is a foreground process.
+    - `Background Processes:` These processes run independently of user input, often performing long-running tasks in the background, such as a file backup **(rsync)**.
+    - `Daemon Processes:` These are special background processes that start at system boot and provide services, like **sshd** for SSH or **cron** for scheduled tasks.
+
+# Lifecycle of a Process
+    The lifecycle of a process includes several stages:
+    - `Creation:` A process is created using the `fork()` system call, which duplicates the parent process. The init process **(PID 1)` is the first process and the ancestor of all others**.
+    - `Execution:` The child process can replace its memory space with a new program using the `exec()` system call.
+    - `Waiting:` A process may enter a waiting state if it needs to wait for resources or input/output (I/O) operations to complete.
+    - `Termination:` When a process completes its task, it calls `exit()`, and its exit status is returned to the parent process via the `wait()` system call.
+
+# Understanding Process States
+    A Linux process can be in several states:
+        - `R (Running):` The process is either running or ready to run.
+        - `S (Sleeping):` The process is waiting for an event, such as **I/O completion**.
+        - `D (Uninterruptible Sleep):` The process is waiting for a non-interruptible event (often I/O).
+        - `Z (Zombie):` The process has completed execution but hasn't been cleaned up by its parent.
+        - `T (Stopped):` The process is paused, usually via a signal like **SIGSTOP**.
+
+# Signals in Process Management
+    Linux uses signals to communicate with processes. Some common signals include:
+
+    - `SIGTERM (15):` Gracefully terminate a process.
+    - `SIGKILL (9):` Forcefully kill a process.
+    - `SIGSTOP (19):` Pause a process.
+    - `SIGCONT (18):` Resume a paused process.
+
+    
+# Handling Zombie Processes
+    A zombie process is one that has completed execution but still has an entry in the process table. It does not consume resources but can clutter the process list.
+    To identify zombie processes:
+    ```shell
+    ps aux | grep Z
+    ```
+    ![zombieprocess](/static/images/blog/linux-process-management/p1.png)
+    If you encounter zombies frequently, it may indicate an issue where the parent process is not handling the child process’s exit status properly. Usually, the init process adopts and cleans up zombie processes.
+
+# scenarios
+    - **top / htop - Monitor System Performance**
+
+        `Scenario: High CPU or Memory Usage`
+
+        Use top or htop to monitor system performance, identify CPU or memory-hogging processes, and diagnose server slowdowns.
+        ```shell 
+        # top provides a real-time view of running processes, sorted by CPU usage by default.
+        top
+        ```
+        ![top](/static/images/blog/linux-process-management/p2.png)
+        
+        ```shell 
+        #  htop offers an enhanced, interactive interface with more visual cues (install it using sudo apt install htop).
+        htop
+        ```
+       
+        ![htop](/static/images/blog/linux-process-management/p4.png)
+
+    - **ps - List Processes**
+
+        `Scenario: Identifying a Process Using High Resources`
+        
+        When you want detailed information about specific processes, especially those consuming a lot of CPU or memory:
+
+        ```shell 
+        # Lists all processes, sorts them by CPU usage, and displays the top 10.
+        ps -aux --sort=-%cpu | head -n 10
+        ```
+        ![sort by cpup](/static/images/blog/linux-process-management/p3.png)
+
+        ```shell
+        # Shows processes sorted by memory usage.
+        ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head
+        ```
+        ![ps](/static/images/blog/linux-process-management/p5.png)
+
+    - **kill and killall - Terminate Processes**
+
+        `Scenario: Stopping Unresponsive or Overloaded Processes`
+
+        If a process becomes unresponsive or is consuming too many resources:
+        ```shell
+        # kill -9 forcefully terminates a process with the specified PID.
+        kill -9 <PID>
+        ```
+
+        ```shell
+        # killall terminates all instances of a specified process by name (e.g., all nginx processes).
+        killall nginx
+        ```
+        
+
+    - **pstree - Visualize Process Hierarchy**
+
+        `Scenario: Analyzing Parent-Child Relationships in Processes`
+
+        Use pstree to view the hierarchy of processes, especially useful when dealing with web servers that spawn multiple worker processes (e.g., apache, nginx).
+        
+        ```shell
+        # Shows a tree view of all running processes with their PIDs.
+        pstree -p
+        ```
+        ![ps](/static/images/blog/linux-process-management/p7.png)
+        
+
+    - **strace - Trace System Calls**
+
+        `Scenario: Diagnosing Hanging or Unresponsive Processes`
+
+        If a process is running but not responding as expected, use strace to trace its system calls.
+
+        ```shell
+        # Attaches to the specified process and logs system calls it makes.
+        strace -p <PID>
+        ```
+        
+
+    - **lsof - List Open Files**
+
+        `Scenario: Identifying Open Files and Network Connections`
+
+        If a process is suspected of holding onto files or network sockets, lsof can provide detailed information.
+
+        ```shell
+        # Lists all files opened by a specific process.
+        lsof -p <PID>
+        ```
+        
+        ```shell 
+        # Shows processes listening on port 80 (useful for identifying web server activity).
+        lsof -i :80
+        ```
+        ![lsof 1](/static/images/blog/linux-process-management/p8.png)
+        
+
+    - **netstat / ss - Network Statistics**
+
+        `Scenario: Analyzing Network Connections for Web Server Issues`
+
+        If your web server is experiencing high traffic or connection issues, use netstat or ss to investigate.
+
+        ```shell 
+        # Displays active network connections with the associated processes and PIDs.
+        netstat -plant
+        ```
+        ![netstat](/static/images/blog/linux-process-management/p9.png)
+
+        ```shell
+        # Provides a similar output with a more modern tool, showing listening ports.
+        ss -tuln
+        ```
+        ![ss](/static/images/blog/linux-process-management/p10.png)
+        
+    - **vmstat - System Performance**
+
+        `Scenario: Identifying CPU, Memory, and I/O Bottlenecks`
+        
+        Use vmstat to get a quick overview of system performance, including CPU, memory, and disk I/O activity.
+            
+        ```shell 
+        # Shows system performance every 2 seconds, 5 times.
+        vmstat 2 5
+        ```
+        ![vmstat](/static/images/blog/linux-process-management/p11.png)
+
+
+    - **pmap - Memory Map of a Process**
+
+        `Scenario: Analyzing Memory Usage`
+
+        If you suspect a memory leak or need to inspect memory usage of a process:
+
+        ```shell 
+        # Displays the memory map of the specified process.
+        pmap <PID>
+        ```
+        ![pmap](/static/images/blog/linux-process-management/p12.png)
+
+    - **systemctl - Manage System Services**
+
+        `Scenario: Restarting Failed or Unresponsive Services`
+
+        For managing web server services like nginx or apache:
+
+        ```shell
+        # Checks the status of the nginx service.
+        sudo systemctl status nginx
+        ```
+
+    - **journalctl - View System Logs**
+
+        `Scenario: Investigating Service Failures`
+
+        If a service fails to start or crashes frequently, check the logs:
+
+        ```shell
+        # Displays logs for the nginx service.
+        sudo journalctl -u nginx
+        ```
+        
+        ```shell
+        # Shows the last system errors with detailed logs.
+        sudo journalctl -xe
+        ```
+        ![journalctl](/static/images/blog/linux-process-management/p13.png)
+        
+
+    - **nice and renice - Adjust Process Priority**
+
+        `Scenario: Managing High CPU Usage by Lowering Priority`
+
+        If a process is consuming too much CPU but you cannot terminate it:
+        ```shell 
+        # Starts a new process with lower priority.
+        nice -n 10 <command>
+        ```
+        
+        ```shell
+        # Lowers the priority of an already running process.
+        renice +10 <PID>
+        ```
+        
+
+    - **pkill - Kill Processes by Name**
+
+        `Scenario: Quickly Terminating Multiple Processes`
+
+        If you need to kill all instances of a specific process (e.g., PHP workers):
+
+        ```shell
+        # Terminates all php-fpm processes.
+        pkill php-fpm
+        ```
+
+    - **uptime - System Uptime and Load Average**
+        
+        `Scenario: Checking Server Load`
+
+        To quickly check how long the server has been running and the current load average:
+
+        ```shell
+        # Shows the current time, uptime duration, and average system load over the last 1, 5, and 15 minutes.
+        uptime
+        ```
+        ![uptime](/static/images/blog/linux-process-management/p14.png)
+        
+
+#### Summary Table of Commands
+
+| Command     | Description                                  | Scenario                                |
+|-------------|----------------------------------------------|-----------------------------------------|
+| `top/htop`  | Real-time process monitoring                 | High CPU/Memory usage analysis          |
+| `ps`        | List processes with detailed info            | Identifying resource-heavy processes    |
+| `kill`      | Terminate a process                          | Killing unresponsive processes          |
+| `killall`   | Terminate all instances of a process by name | Stopping multiple processes (e.g., `nginx`) |
+| `pstree`    | Visualize process hierarchy                  | Analyzing parent-child process relationships |
+| `strace`    | Trace system calls                           | Debugging hanging or unresponsive processes |
+| `lsof`      | List open files by process                   | Checking open files or network sockets  |
+| `netstat/ss`| Analyze network connections                  | Network troubleshooting                 |
+| `vmstat`    | System performance metrics                   | Identifying CPU, memory, and I/O bottlenecks |
+| `pmap`      | Memory map of a process                      | Inspecting memory usage                 |
+| `smem`      | Memory usage summary                         | Checking per-process memory usage       |
+| `systemctl` | Manage system services                       | Restarting or checking service status   |
+| `journalctl`| View system logs                             | Investigating service failures          |
+| `nice`      | Start a process with adjusted priority       | Running CPU-intensive tasks with lower priority |
+| `renice`    | Adjust priority of an existing process       | Lowering priority of resource-heavy processes |
+| `pkill`     | Kill processes by name                       | Quickly terminating multiple processes  |
+| `uptime`    | Check system uptime and load average         | Monitoring server load                  |
+
+
+<strong>Thanks for reading!</strong>
