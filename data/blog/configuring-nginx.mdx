@@ -1,0 +1,629 @@
+---
+title: 'Configuring Nginx'
+date: '2024-12-04'
+lastmod: '2024-12-04'
+tags: ['nginx']
+draft: false
+summary: 'Guide to configuring Nginx'
+---
+
+# Introduction
+
+[Nginx](https://nginx.org/) is a powerful web server and reverse proxy known for its **speed, scalability, and ease of configuration**. In this guide, we’ll explore various configurations from basic setups to advanced use cases, with detailed explanations of each configuration file.
+
+When working with NGINX configuration files, you'll encounter two essential concepts: **directives** and **contexts**. These form the backbone of how NGINX processes its configurations.
+
+- **Directives:**
+
+    In an NGINX configuration file, every instruction is referred to as a directive. There are two types of directives:
+
+    - **Simple Directives:**
+
+        These consist of a directive name followed by parameters separated by spaces. Each simple directive ends with a semicolon (;). Examples include directives like `listen`, `server_name`, and `return`.
+
+        Example:
+        ```
+        listen 80;
+        return 404;
+        ```
+
+    - **Block Directives:**
+
+        Block directives are similar to simple directives but, instead of ending with a semicolon, they use curly braces ({ }) to group additional instructions or nested directives.
+
+        Example:
+        ```
+        server {
+            listen 80;
+            server_name example.com;
+        }
+        ```
+- **Contexts:**
+
+    Block directives that can contain other directives inside them are referred to as **contexts**. NGINX has several key contexts that dictate how its configurations are structured:
+
+    - **Main Context:**
+
+        The main context is the outermost level of the configuration file. Any directive defined outside of the events or http contexts belongs to the main context.
+
+    - **Events Context:**
+
+        The events context is used to define global settings related to how NGINX handles incoming client connections.
+
+        **Example:**
+        ```
+        events {
+            worker_connections 1024;
+        }
+        ```
+    - **HTTP Context:**
+
+        The http context specifies settings for handling HTTP and HTTPS traffic. It acts as the parent for other contexts like server and location.
+
+        **Example:**
+        ```
+        http {
+            include mime.types;
+            default_type application/octet-stream;
+        }
+        ```
+    - **Server Context:**
+
+        Nested inside the http context, the server context allows you to define settings for individual virtual servers (e.g., different websites or domains).
+
+        **Example:**
+        ```
+        http {
+            server {
+                listen 80;
+                server_name example.com;
+            }
+
+            server {
+                listen 443 ssl;
+                server_name secure.example.com;
+            }
+        }
+        ```
+
+    **Code for each section can be found [here on github](https://github.com/mythLabs/blog-content/tree/main/configuring-nginx)**
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+**Note:**
+
+    Since we don't own the domain being used and are only using it for learning purposes, we will update the hosts file to map the domain (e.g., mothership.io) to localhost.
+
+        - **Steps:**
+            - **Locate the hosts file**
+                On Windows: `C:\Windows\System32\drivers\etc`
+            - **Add the following entry to the file:**
+
+                ```plaintext
+                127.0.0.1 mothership.io
+                ```
+            - **Running Examples:**
+                The examples are designed to work with Docker Compose. To get started, simply run the following command:
+
+                ```bash
+                docker compose up
+                ```
+            - **Familiarity with Docker Compose is a prerequisite. For more details, refer to [this blog](https://amitbrewscode.in/blog/docker-compose-makes-life-easier).**
+
+# Basic config
+
+    ```yaml:docker-compose.yaml
+    services:
+    nginx:
+        image: "nginx:1.27.1-alpine-slim"
+        container_name: nginx
+        volumes:
+        - ./nginx.conf:/etc/nginx/nginx.conf:ro
+        ports:
+        - "80:80"
+        networks:
+        - app-network
+
+    networks:
+    app-network:
+        driver: bridge
+    ```
+
+    ```nginx:nginx.conf
+    events {}
+
+    http {
+        server {
+
+            listen 80;
+            server_name mothership.io;
+
+            return 200 "Hello world\n";
+        }
+    }
+    ```
+    **Config explained:**
+
+        This Nginx configuration creates a server that listens on **port 80** for requests to **mothership.io** and always responds with "Hello world\n" and an HTTP 200 status code:
+        - **events {}:** A required block for Nginx to start, even if empty. It handles connection processing settings but isn't used here.
+        - **http {}:** Defines the HTTP server configuration.
+        - **server {}:** Defines an individual server block (virtual host).
+        - **listen 80:** Configures the server to listen for requests on port 80 (HTTP).
+        - **server_name mothership.io:** Specifies the domain name this server will respond to.
+        - **return 200 "Hello world\n":** Returns a plain-text response "Hello world\n" with an HTTP 200 status code for all requests.
+
+    **Output:**
+        ![basic](/static/images/blog/configuring-nginx/p1.png)
+
+# Multiple virtual servers
+
+    ```yaml:docker-compose.yaml
+    services:
+        nginx:
+            image: "nginx:1.27.1-alpine-slim"
+            container_name: nginx
+            volumes:
+            - ./nginx.conf:/etc/nginx/nginx.conf:ro
+            ports:
+            - "80:80"
+            - "3000:3000"
+            networks:
+            - app-network
+
+    networks:
+        app-network:
+            driver: bridge
+    ```
+
+    ```nginx:nginx.conf
+    events {}
+
+    http {
+        server {
+            listen 3000;
+            server_name mothership.io;
+            return 200 "Hello world from port 3000\n";
+        }
+
+        server {
+            listen 80;
+            server_name mothership.io;
+            return 200 "Hello world from port 80\n";
+        }
+    }
+    ```
+    **Config explained:**
+
+        This Nginx configuration sets up two servers for the same domain (mothership.io) but on different ports:
+        
+        - **First server block:**
+            - **listen 3000:** Listens for requests on port 3000.
+            - **server_name mothership.io:** Responds to requests for mothership.io.
+            - **return 200 "Hello world from port 3000\n":** Always responds with "Hello world from port 3000\n" and an HTTP 200 status code.
+        
+        - **Second server block:**
+            - **listen 80:** Listens for requests on port 80 (default HTTP port).
+            - **server_name mothership.io:** Also responds to requests for mothership.io.
+            - **return 200 "Hello world from port 80\n":** Always responds with "Hello world from port 80\n" and an HTTP 200 status code.
+
+    **Output:**
+        ![basic](/static/images/blog/configuring-nginx/p2.png)
+
+        ![basic](/static/images/blog/configuring-nginx/p3.png)
+
+
+# Serve static content
+    ```yaml:docker-compose.yaml 
+    services:
+        nginx:
+            image: "nginx:1.27.1-alpine-slim"
+            container_name: nginx
+            volumes:
+            - ./nginx.conf:/etc/nginx/nginx.conf:ro
+            - ./app:/srv/app:ro
+            ports:
+            - "80:80"
+            networks:
+            - app-network
+
+    networks:
+        app-network:
+            driver: bridge
+    ```
+
+    ```nginx:nginx.conf 
+    events {}
+
+    http {
+
+        include /etc/nginx/mime.types;
+
+        server {
+            listen 80;
+            server_name mothership.io;
+            root /srv/app;
+        }
+    }
+    ```
+
+    **Config explained:**
+
+        This Nginx configuration sets up a simple HTTP server with additional MIME type handling and file serving (index.html):
+
+            - **include /etc/nginx/mime.types:** Includes MIME type mappings from the specified file to ensure proper handling of file types (e.g., serving .html as text/html).
+            - **root /srv/app:** Sets the root directory for serving files. Files will be served from **/srv/app** when requested.
+
+    **Output**:
+        ![basic](/static/images/blog/configuring-nginx/p4.png)
+
+# Locations
+    ```nginx:nginx.conf 
+    events {}
+
+    http {
+
+        include /etc/nginx/mime.types;
+
+        server {
+            listen 80;
+            server_name mothership.io;
+
+            root /srv/app;
+
+            location /info {
+                return 200 "Info content";
+            }
+
+            location = /help {
+                return 200 "Help content";
+            }
+
+            location ~ /customer[0-9] {
+                return 200 "Customer content";
+            }
+        }
+    }
+    ```
+
+    **Config explained:**
+
+        This Nginx configuration sets up a server with custom routes that respond differently based on the request path:
+            - **location /info {}:** Returns "Info content" for requests to `/info`.this will also satisfy `/infozone` or any string having info as prefix
+            - **location = /help {}:** Matches exactly /help and returns "Help content".
+            - **location ~ /customer[0-9] {}:** Uses a regular expression to match URLs like `/customer1`, `/customer2`, etc., and returns "Customer content".
+
+    **Output:**
+        ![basic](/static/images/blog/configuring-nginx/p5.png)
+        > content served at /info
+
+        ![basic](/static/images/blog/configuring-nginx/p6.png)
+        > content served at /infozone as it has info as prefix
+
+        ![basic](/static/images/blog/configuring-nginx/p7.png)
+        > content not served at /2infozone as it does not have info as prefix
+
+        ![basic](/static/images/blog/configuring-nginx/p8.png)
+        > content served at /help
+
+        ![basic](/static/images/blog/configuring-nginx/p9.png)
+        > content not served at /helpp as it need exact match with string help, not a prefix
+
+        ![basic](/static/images/blog/configuring-nginx/p10.png)
+        >content served at customer1 as the regex(have a number at end of path) is satisfied
+
+        ![basic](/static/images/blog/configuring-nginx/p11.png)
+        >content not served at customer1 as the regex is not satisfied
+
+
+# Rewrites and Redirects
+
+    ```nginx:nginx.conf 
+    events {}
+
+    http {
+        include /etc/nginx/mime.types;
+
+        server {
+            listen 80;
+            server_name mothership.io;
+
+            root /srv/app;
+
+            location /info {
+                return 307 /index.html;
+            }
+
+            rewrite /help /index.html;
+        }
+
+    }
+    ```
+
+    **Config explained:**
+
+        This configuration serves files from `/srv/app`, temporarily redirects `/info` to `/index.html`, and internally rewrites `/help` to `/index.html`.
+
+            - **location /info {}:** Redirects requests to `/info` to `/index.html` using a **307 Temporary Redirect**.
+            - **rewrite /help /index.html:** Internally rewrites requests to `/help` so they are handled as `/index.html` without changing the URL visible to the client.
+
+    **Output:**
+        ![basic](/static/images/blog/configuring-nginx/p12.png)
+        >We can see a 307 status code in network request
+
+        ![basic](/static/images/blog/configuring-nginx/p13.png)
+        >We can see the url is /help but content is from index
+
+# Setup HTTPS
+    
+    This configuration, method is elaborately explained in this blog [The SSL/TLS Certificate Lifecycle: A Quick Guide](https://amitbrewscode.in/blog/ssl-lifecycle-components).Please refer it.
+
+# Reverse proxy
+    ```yaml:docker-compose.yaml 
+    services:
+        app1:
+            image: "nginx:1.27.1-alpine-slim"
+            container_name: app1
+            volumes:
+            - ./app1/nginx.conf:/etc/nginx/nginx.conf:ro
+            - ./app1:/srv/app:ro
+            networks:
+            - app-network
+        app2:
+            image: "nginx:1.27.1-alpine-slim"
+            container_name: app2
+            volumes:
+            - ./app2/nginx.conf:/etc/nginx/nginx.conf:ro
+            - ./app2:/srv/app:ro
+            networks:
+            - app-network
+        nginx:
+            image: "nginx:1.27.1-alpine-slim"
+            container_name: nginx
+            volumes:
+            - ./nginx.conf:/etc/nginx/nginx.conf:ro
+            ports:
+            - "80:80"
+            networks:
+            - app-network
+
+    networks:
+        app-network:
+            driver: bridge
+    ```
+
+    ```nginx:nginx.conf 
+    events {}
+
+    http {
+        include /etc/nginx/mime.types;
+
+        server {
+            listen 80;
+            server_name mothership.io;
+        
+            location /app1 {
+                    proxy_pass http://app1;          
+                    proxy_set_header Host $host;      
+                    proxy_set_header X-Real-IP $remote_addr;
+
+                    rewrite ^/app1/(.*)$ /$1 break;
+            }
+
+            location /app2 {
+                    proxy_pass http://app2;         
+                    proxy_set_header Host $host;       
+                    proxy_set_header X-Real-IP $remote_addr; 
+
+                    rewrite ^/app2/(.*)$ /$1 break;
+            }
+        }
+    }
+    ```
+
+    **Config explained:**
+
+        This Nginx configuration sets up a reverse proxy that routes traffic to two backend services **(app1 and app2)** based on the request path.
+
+            - **location /app1 {}:**
+                - **proxy_pass http://app1:** Forwards requests starting with /app1 to the backend server app1.
+                - **proxy_set_header:**
+                    - **Host $host:** Passes the original Host header to the backend.
+                    - **X-Real-IP $remote_addr:** Adds the client’s IP address in the  `X-Real-IP` header for the backend.
+                - **rewrite ^/app1/(.*)$ /$1 break:** Strips `/app1` from the request path before passing it to the backend.
+            - **location /app2 {}:**
+                - **proxy_pass http://app2;: Forwards requests starting with /app2 to the backend server app2.
+                - **rewrite ^/app2/(.*)$ /$1 break:** Strips `/app2` from the request path before passing it to the backend.
+
+    **Output:**
+        ![basic](/static/images/blog/configuring-nginx/p16.png)
+
+        ![basic](/static/images/blog/configuring-nginx/p17.png)
+
+    
+
+# Load Balancing
+
+    ```nginx:nginx.conf 
+    events {}
+
+    http {
+        include /etc/nginx/mime.types;
+
+        server {
+            listen 80;
+            server_name mothership.io;
+
+            location / {
+                    proxy_pass http://backend;
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+            }
+        }
+
+        upstream backend {
+            server app1:80;       # Backend server 1
+            server app2:80;       # Backend server 2
+        }
+    }
+    ```
+
+    **Config explained:**
+
+        This configuration sets up an Nginx server to proxy requests for mothership.io to a load-balanced group of two backend servers **(app1 and app2)**.
+            - **proxy_pass http://backend:** Forwards requests to the backend upstream group.
+            - **proxy_set_header Host $host:** Sets the Host header in the forwarded request to the client's original Host.
+            - **proxy_set_header X-Real-IP $remote_addr:** Adds the client's IP address to the X-Real-IP header for backend servers.
+            - **upstream backend {}:** Defines a load-balanced group of backend servers:
+                - **server app1:80:** Specifies app1 as a backend server on port 80.
+                - **server app2:80:** Specifies app2 as a backend server on port 80.
+    
+    **Output:**
+        ![basic](/static/images/blog/configuring-nginx/p14.png)
+
+        ![basic](/static/images/blog/configuring-nginx/p15.png)
+
+
+# Rate Limiting
+
+    ```nginx:nginx.conf 
+    events {}
+
+    http {
+        limit_req_zone $binary_remote_addr zone=one:10m rate=10r/s;
+
+        server {
+            location /login {
+                limit_req zone=one burst=5 nodelay;
+
+                return 200 "Hello world\n";
+            }
+        }
+    }
+    ```
+    **Config explained:**
+
+        This configuration limits requests to **/login to 10 requests per second per client IP**, allowing up to **5 extra burst requests**, and returns "Hello world" for requests that are within the rate limit.
+        - **limit_req_zone:** Defines a shared memory zone for rate limiting.
+            - **$binary_remote_addr:** Uses the client's IP address as the key for rate limiting.
+            - **zone=one:10m:** Allocates a 10MB memory zone named one for storing rate-limiting data.
+            - **rate=10r/s:** Allows up to 10 requests per second per client IP.
+        - **location /login {}:**
+            - **limit_req:** Applies the rate-limiting rule:
+                - **zone=one:** Uses the one rate-limiting zone.
+                - **burst=5:** Allows up to 5 extra requests in a burst.
+                - **nodelay:** No delay for burst requests, they are processed immediately.
+            - **return 200 "Hello world\n":** Responds with a status code 200 and the text "Hello world" when the rate limit is respected.
+
+    **Behavior:**
+        - Requests to /login are limited to 10 requests per second per client IP.
+        - Clients can burst up to 5 extra requests beyond the rate limit without delay.
+        - If the rate limit or burst allowance is exceeded, requests are rejected with an HTTP 503 status code.
+        - A successful request within the limits responds with "Hello world\n".
+
+# Monitoring
+
+    ```nginx:nginx.conf 
+    events {}
+
+    http {
+        server {
+            location /nginx_status {
+                stub_status; # Enables Nginx status metrics
+            }
+        }
+    }
+    ```
+
+    **Config explained:**
+
+        This Nginx configuration enables a status endpoint that provides basic metrics about the server's performance and connections.
+
+            - **stub_status:** Activates the Nginx stub status module to provide real-time metrics about the server.
+
+    **Behavior:**
+    
+        When a client accesses `/nginx_status`, Nginx returns plain-text metrics such as:
+            - **Active connections:** Number of current client connections.
+            - **Accepted connections and handled requests:** Totals since the server started.
+            - **Reading:** Connections reading client requests.
+            - **Writing:** Connections writing responses.
+            - **Waiting:** Idle connections in the keep-alive state.
+    
+    **Output:**
+        ![basic](/static/images/blog/configuring-nginx/p18.png)
+
+13. Performance optimization
+
+    - **Worker Processes and Connections**
+        
+        Nginx is designed to handle thousands of connections efficiently. To optimize its performance, configure the number of worker processes and connections based on your server's resources.
+
+        ```nginx
+        worker_processes auto;               # Ensures Nginx uses all available CPU cores.
+        worker_connections 1024;             # Sets the maximum number of simultaneous connections per worker process.
+        events {
+            use epoll;                       # Use efficient event model (Linux-specific)
+            multi_accept on;                 # Allows workers to accept multiple connections simultaneously.
+        }
+        ``` 
+
+    - **Gzip Compression**
+        
+        Enabling Gzip reduces bandwidth usage by compressing responses before sending them to clients.
+
+        ```nginx 
+            gzip on;                            # Enables Gzip compression.
+            gzip_types text/plain text/css;     # Specifies MIME types to compress.
+            gzip_min_length 1024;               # Only compress responses larger than 1KB.
+            gzip_vary on;                       # Ensures proxies cache compressed and uncompressed versions separately.
+            gzip_proxied any;                   # Enable compression for proxied requests
+        ```
+
+    - **Cache Static Files**
+        
+        Serving static files from cache improves response times and reduces load on the backend.
+        ```nginx 
+        location /static/ {
+            root /var/www/example;
+            expires max;                                    # Caches static files for as long as possible.
+            add_header Cache-Control "public, immutable";   # Enhances caching by marking files as immutable unless they’re updated.
+        }
+        ```
+
+
+    - **Limit Request Buffer Size**
+        
+        Reducing buffer sizes prevents excessive memory usage and protects against potential denial-of-service attacks.
+
+        ```nginx
+        client_max_body_size 10M;           # Sets the maximum size of uploaded files.
+        client_body_buffer_size 128k;       # Allocates memory for buffering request bodies.
+        client_header_buffer_size 1k;       # Buffer size for request headers
+        large_client_header_buffers 4 8k;   # Defines buffers for requests with large headers.
+        ```
+
+    - **Connection Timeout**
+        
+        Fine-tuning timeouts ensures the server doesn’t waste resources on slow clients.
+
+        ```nginx 
+            keepalive_timeout 15;               # Controls how long a connection remains open after a request.
+            send_timeout 10;                    # Sets the timeout for transmitting responses to clients.
+            client_header_timeout 10;           # Timeout for reading client headers
+            client_body_timeout 10;             # Timeout for reading client request body
+        ```
+    - **Enable HTTP/2**
+            
+            HTTP/2 improves performance by multiplexing multiple requests over a single connection.
+
+            ```nginx
+                server {
+                    listen 443 ssl http2;   # Enables HTTP/2 for faster connection reuse and lower latency.
+                    .
+                    .
+                    .
+                }
+            ```
+            http2: Enables HTTP/2 for faster connection reuse and lower latency.
+
+<strong>Thanks for reading!</strong>
