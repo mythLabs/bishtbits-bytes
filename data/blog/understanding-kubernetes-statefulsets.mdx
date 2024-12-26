@@ -262,7 +262,7 @@ Here's how it works:
     ![pv](/static/images/blog/understanding-kubernetes-statefulsets/p8.png)
     >The service name resolves to three IPs, each assigned to a pod. We can either call the service, and traffic will be load-balanced across the pods, or we can directly call individual pods using their respective pod names.
 
-  - **Scaling **
+  - **Scaling**
 
     The StatefulSet controller creates each pod sequentially based on its ordinal index, ensuring that each pod's predecessor is Running and Ready before launching the next pod.
 
