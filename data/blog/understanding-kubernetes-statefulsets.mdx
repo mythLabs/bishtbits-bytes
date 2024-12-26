@@ -1,0 +1,332 @@
+---
+title: 'Understanding Kubernetes StatefulSets'
+date: '2024-12-26'
+lastmod: '2024-12-26'
+tags: ['kubernetes']
+draft: false
+summary: 'Explore the fundamentals and key features of Kubernetes StatefulSets for managing stateful applications in a scalable and reliable manner.'
+---
+
+# Introduction
+
+**Kubernetes** is a powerful container orchestration platform designed for deploying and managing containerized applications at scale. 
+
+While **Deployments**  are commonly used for stateless applications, there are scenarios where the state of an application must be preserved. Enter **StatefulSets**, a specialized Kubernetes resource designed for managing **stateful applications**. 
+
+This blog explores StatefulSets in detail, including use cases, and how to implement them.
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+---
+
+# What Are StatefulSets?
+
+A **StatefulSet** is a Kubernetes workload API object used to manage stateful applications. Unlike **Deployments**, which treat Pods as interchangeable, StatefulSets provide:
+
+- **Stable Network Identity**
+
+  Each Pod in a StatefulSet gets a DNS name in the format:
+  ```
+  <pod-name>.<service-name>
+  ```
+  **For example,** if a StatefulSet is named `my-db` and is associated with a headless service `my-db-service`, the Pods will have DNS names like:
+
+  - `my-db-0.my-db-service`
+  - `my-db-1.my-db-service`
+
+  This is critical for stateful applications, such as databases, where Pods must refer to each other reliably.
+
+- **Persistent Storage**
+
+  StatefulSets use **PersistentVolumeClaims (PVCs)** to provision storage for each Pod. Unlike Deployments, where storage is ephemeral and shared, each Pod in a StatefulSet gets its **own dedicated volume**, ensuring that the data persists across Pod restarts or rescheduling.
+
+- **Ordered Deployment and Scaling**
+
+  - **Creation**: Pods are created sequentially, one at a time (e.g., `my-db-0`, then `my-db-1`).
+  - **Termination**: Pods are terminated in reverse order (e.g., `my-db-2`, then `my-db-1`).
+  - **Updates**: StatefulSets update Pods in a rolling fashion, ensuring that at most one Pod is unavailable during an update.
+
+---
+
+# Headless service 
+
+A **headless service in Kubernetes** is a service that does not create a **cluster IP**, meaning it doesn't have a single IP address that clients can use to access it. Instead, the service exposes the individual IPs of the pods directly. 
+
+To create a headless service, you can set the `clusterIP: None` in the service definition.
+
+DNS resolution for a headless service in Kubernetes works differently than for a standard service. 
+
+Here's how it works:
+  - **DNS Query**
+
+    When a pod makes a DNS query for the headless service (e.g., my-headless-service.default.svc.cluster.local), Kubernetes doesn't return a single IP address. Instead, it **returns a list of IP addresses**, each corresponding to the individual pods that are part of the service.
+
+  - **Resolution Behavior**
+
+    - For a **standard service**, DNS returns a single IP (the ClusterIP) for load balancing.
+    - For a **headless service**, DNS resolution returns multiple pod IPs, typically as **A records or SRV records**, which allows direct access to individual pods.
+
+---
+
+# StatefulSet vs Deployment
+
+| Feature                 | StatefulSet                            | Deployment                              |
+|-------------------------|----------------------------------------|-----------------------------------------|
+| **Pod Identity**        | Stable and unique                     | Interchangeable                         |
+| **Storage**             | Persistent, unique for each Pod       | Ephemeral or shared                    |
+| **Deployment Order**    | Ordered                               | Parallel                                |
+| **Scaling Behavior**    | Sequential                            | Parallel                                |
+| **Use Cases**           | Databases, distributed systems        | Stateless apps, frontends, microservices |
+
+
+
+---
+
+# Let's get our hands dirty
+
+>All commands are executed on a Kubernetes cluster deployed locally using Minikube.
+
+- **Create a Deployment**
+
+  Deploy Nginx as a Deployment, just for comparison.
+
+  ```yaml:deployment.yaml
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+  name: nginx-deployment
+  labels:
+    app: nginx-deploy
+  spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx-deploy
+  template:
+    metadata:
+      labels:
+        app: nginx-deploy
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+    ```           
+  ![pv](/static/images/blog/understanding-kubernetes-statefulsets/p2.png)
+  > We can see that the pod gets random alphanumeric characters attached to its name, and these are ephemeral.
+
+- **Create a Persistent Volume**
+
+  This Persistent Volume (PV) is created using the host filesystem. Generally, a cloud provider is used to create volumes in production environments.
+
+  ```yaml:pv.yaml
+  apiVersion: v1
+  kind: PersistentVolume
+  metadata:
+    name: nginx-pv
+  spec:
+    capacity:
+      storage: 1Gi
+    volumeMode: Filesystem
+    accessModes:
+      - ReadWriteOnce
+    persistentVolumeReclaimPolicy: Retain
+    storageClassName: manual
+    hostPath:
+      path: /tmp/nginx-data
+      type: DirectoryOrCreate
+  ```
+  ![pv](/static/images/blog/understanding-kubernetes-statefulsets/p1.png)
+
+
+- **Create a StatefulSet**
+
+    This is a StatefulSet YAML file, which differs slightly from a Deployment YAML file:
+
+      - **spec.serviceName:** Specifies the name of the headless service used for pod DNS address resolution.
+      - **volumeClaimTemplates:** A PersistentVolumeClaim (PVC) is created to claim storage from a PersistentVolume (PV) for each pod.
+      
+    **initContainers:** Although not specific to StatefulSets, it is used in this case to create a custom HTML index page that returns the hostname.
+
+    ```yaml:sts.yaml
+    apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: nginx-stateful
+    spec:
+      serviceName: "nginx-service-hl"
+      replicas: 3
+      selector:
+        matchLabels:
+          app: nginx-stateful
+      template:
+        metadata:
+          labels:
+            app: nginx-stateful
+        spec:
+          initContainers:
+          - name: setup
+            image: busybox:1.28  
+            command: ["/bin/sh", "-c", "echo '<h1>Hello !! </h1>I am loaded from <b>nginx-pvc</b> <br>Pod name: <b>\'$HOSTNAME\'' > /usr/share/nginx/html/index.html && echo 'done' && exit "]  
+            volumeMounts:
+            - mountPath: /usr/share/nginx/html
+              name: nginx-data
+          containers:
+          - name: nginx
+            image: nginx:latest
+            ports:
+            - containerPort: 80
+            volumeMounts:
+            - name: nginx-data
+              mountPath: /usr/share/nginx/html  # Mount same volume to nginx container
+
+      volumeClaimTemplates:
+      - metadata:
+          name: nginx-data
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+
+    ```
+
+   ![pv](/static/images/blog/understanding-kubernetes-statefulsets/p3.png)
+   >Each of the three pods gets two PersistentVolumeClaims (PVCs) attached, enabling them to use storage from the PersistentVolumes (PVs).
+
+- Now, let's explore and discover some key properties of StatefulSets in practice:
+
+  - **Unique ordinal index**
+
+    The three pods from the StatefulSet have names with **random strings attached, but their identity is stable and defined**. In contrast, pods created by a Deployment are **truly ephemeral, with random strings in their names**.
+
+    If I delete one pod from the StatefulSet and one from the Deployment, a new pod will be created for the Deployment, but for the StatefulSet, a pod with the same name and the same PVC will be created, **ensuring persistence**.
+
+    ![pv](/static/images/blog/understanding-kubernetes-statefulsets/p4.png)
+
+  - **Stable Network Identity**
+
+    To access Nginx, whether deployed as a Deployment or a StatefulSet, we need a service.
+
+    For the Deployment, we create a service of type ClusterIP, which will load balance traffic across multiple pods.
+
+    ```yaml:deployment-svc.yaml
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: nginx-service-d
+      labels:
+        app: nginx-deploy
+    spec:
+      selector:
+        app: nginx-deploy # Matches the labels of the Nginx Pods in the Deployment
+      ports:
+        - protocol: TCP
+          port: 80         # Port on the Service
+          targetPort: 80   # Port on the Nginx Pods
+      type: ClusterIP
+    ```
+    ![pv](/static/images/blog/understanding-kubernetes-statefulsets/p5.png)
+    >We can access the nginx deployment using the cluster IP as should in image and the name for service as a DNS address.
+
+    Let's try to connect to it. I will be using an image I built that contains all the necessary networking tools to curl the Nginx Deployment's service.
+    [Check this blog to learn more](https://www.amitbrewscode.in/blog/networking-tools-unpacked-linux-edition)
+
+    ```bash
+    kubectl run busybox --image=amit0myth/networking-toolset:v2 --restart=Never --rm -it -- sh
+    ```
+
+    ![pv](/static/images/blog/understanding-kubernetes-statefulsets/p6.png)
+    >As we can see, I can curl the Nginx Deployment using its IP, the service name, and the Fully Qualified Domain Name (FQDN), which is resolved using the CoreDNS service.
+
+    In the case of a StatefulSet, we create a headless service.
+    ```yaml:headless-svc.yaml
+        apiVersion: v1
+    kind: Service
+    metadata:
+      name: nginx-service-hl
+      labels:
+        app: nginx-service-hl
+    spec:
+      clusterIP: None # this will result in a headless service
+      selector:
+        app: nginx-stateful
+      ports:
+        - protocol: TCP
+          port: 80
+          targetPort: 80
+    ```
+    ![pv](/static/images/blog/understanding-kubernetes-statefulsets/p7.png)
+    > service nginx-service-hl has no IP 
+
+    ![pv](/static/images/blog/understanding-kubernetes-statefulsets/p8.png)
+    >The service name resolves to three IPs, each assigned to a pod. We can either call the service, and traffic will be load-balanced across the pods, or we can directly call individual pods using their respective pod names.
+
+  - **Scaling **
+
+    The StatefulSet controller creates each pod sequentially based on its ordinal index, ensuring that each pod's predecessor is Running and Ready before launching the next pod.
+
+    ```bash 
+    kubectl scale sts nginx-stateful --replicas=5
+    ```
+    ![pv](/static/images/blog/understanding-kubernetes-statefulsets/p9.png)
+    >When scaling up a StatefulSet, the control plane creates new pods in sequential order, starting with the next available ordinal index, and ensures that each new pod is Running and Ready before creating the next one.
+
+
+    ```bash
+    # This will perform instant downscale, without taking into account the ordinal index sequence.
+    kubectl scale sts nginx-stateful --replicas=2 => instant scale down 
+    ```
+
+    ```bash 
+    kubectl patch sts nginx-stateful -p '{"spec":{"replicas":2}}
+    ```
+    ![pv](/static/images/blog/understanding-kubernetes-statefulsets/p10.png)
+        >The control plane deletes one pod at a time, in reverse order of its ordinal index, and waits for each pod to be fully shut down before deleting the next one.
+
+---
+# Use cases
+
+- **Databases**
+    - StatefulSets are ideal for managing databases that need consistent data storage and predictable scaling.
+    - **Distributed Databases:** StatefulSets help maintain the topology of distributed systems like etcd and CockroachDB.
+- **Distributed Message Queues**
+    - StatefulSets are often used to deploy messaging systems that rely on state and partitioning for scalability.
+        - **Kafka:** Brokers need stable identities for partitions and replication.
+- **Search and Indexing Engines**
+    - For applications that manage large-scale indexing and require state.
+        - **Elasticsearch:** StatefulSets provide stable network identities for nodes in a cluster.
+- **Persistent Logging and Monitoring Systems**
+    - Systems that require stateful components to store logs or metrics.
+      - **Prometheus with Long-Term Storage:** Prometheus may use StatefulSets for storage backends like Thanos or Cortex.
+- **Streaming Applications**
+    - Applications that handle real-time data streams.
+      - **Apache Flink:** Stateful applications with distributed checkpoints.
+- **Stateful Workloads with Leader Election**
+    - Applications that require a leader election process.
+      - **etcd:** Used as a distributed key-value store for configurations.
+      - **Zookeeper:** Required for managing distributed systems.
+- **Stateful Microservices**
+    - Microservices with state dependencies.
+      - **Payment Gateways:** Stateful services that manage transactions and need persistence.
+      - **Order Processing Systems:** Requires unique states for each service instance.
+- **Batch Processing**
+    - StatefulSets are used in data processing jobs that require checkpointing.
+      - **Hadoop:** StatefulSets can manage Hadoop clusters with persistent storage for HDFS.
+- **Stateful API Gateways**
+    - Gateways that maintain sessions or persistent cache.
+      - **API Rate Limiters:** StatefulSets ensure state persistence for throttling.
+      - **Edge Proxies with Cache:** Proxies like Varnish or Squid may use persistent storage.
+---
+
+# Note
+
+- StatefulSets are not ideal for high-churn workloads where Pods are frequently created and destroyed.
+
+<strong>Thanks for reading!</strong>
+
+
+
+
+
+
