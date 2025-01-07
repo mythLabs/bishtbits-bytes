@@ -1,0 +1,306 @@
+---
+title: 'Helm Charts: Basics'
+date: '2025-01-07'
+lastmod: '2025-01-07'
+tags: ['helm','kubernetes']
+draft: false
+summary: 'Start learning helm charts by diving into basics'
+---
+
+# What is Helm?
+`Helm is a package manager for Kubernetes, similar to how apt or yum works for Linux. It simplifies the deployment, management, and versioning of applications on Kubernetes.
+
+- **Key Features of Helm:**
+    - Install, upgrade, and manage Kubernetes applications.
+    - Rollback to previous deployments (version control for deployments).
+    - Simplify the reuse of configuration for different environments (e.g., dev, staging, prod).
+    - Manage dependencies between Kubernetes components.
+    - Integrate with CI/CD pipelines for automated deployments
+
+# What is Helm charts ?
+
+A Helm Chart is a packaged application definition in Helm. It contains all the configuration files, templates, and metadata required to deploy a Kubernetes application.
+
+- **Purpose of Helm Charts:**
+    - Acts as a blueprint for deploying an application on Kubernetes.
+    - Encapsulates all the configuration required to create Kubernetes resources (e.g., Pods, Services, ConfigMaps).
+    - Enables reusability, allowing you to deploy the same application with different configurations using overrides.
+
+# Key Components
+
+- **Repositories**
+
+    A Helm repository is a collection of Helm charts stored at a remote location or locally, which can be used to manage Kubernetes applications.
+
+    - **Popular Helm Repositories:**
+        - **Artifact Hub:** A central hub for finding Helm charts. [Artifactory hub charts](https://artifacthub.io/packages/search?kind=0&sort=relevance&page=1)
+        - **Bitnami:** Offers pre-packaged, production-ready charts. [bitnami charts](https://bitnami.com/stacks/helm)
+
+   Alternatively, you can create your own custom repository for private or public use, which will be discussed later.
+
+- **Charts**
+
+    A chart is a package that contains all the necessary resources to deploy an application in a Kubernetes cluster. It is essentially a collection of files that describe the Kubernetes resources (e.g., Deployments, Services, ConfigMaps) required for the application.
+
+    - **Example**
+        - If you have an application called my-app, a Helm chart for it could:
+            - Define a Deployment for the app.
+            - Include a Service to expose the app.
+            - Provide default configuration via the values.yaml file.
+        
+            Using Helm, you can package this chart and deploy it with a single command, managing the lifecycle of the application easily.
+
+- **Releases**
+
+    A Helm release is an instance of a Helm chart deployed to a Kubernetes cluster. It includes the application’s configuration, state, and version. 
+
+    Helm assigns a unique release name (e.g., my-app) during deployment and tracks its lifecycle, including `installation, upgrades, rollbacks, and uninstallation`. 
+
+    Release information is stored in the cluster (as a ConfigMap or Secret), allowing Helm to manage the application's state and updates effectively.
+
+# Pre-packaged Helm charts
+    These are charts that you can use to deploy common applications, such as Nginx, MySQL, Redis, or Prometheus, without creating your own chart from scratch. These charts are available from public chart repositories like the Artifact Hub or vendor-specific repositories.
+
+    - managing repositories
+
+        ```shell
+        # view list of all configured repositories
+        helm repo list
+        ```
+        ![list](/static/images/blog/helm-charts-basics/p1.png) 
+        >initially no repository is configured
+
+        ```shell
+        # add a repository
+        helm repo add [NAME] [URL]
+        ```
+        ![add](/static/images/blog/helm-charts-basics/p2.png) 
+        > two repositories are added. charts from these repos can be downloaded now
+
+        ```shell 
+        # update a repository
+        helm repo update [NAME]
+        ```
+        ![update](/static/images/blog/helm-charts-basics/p3.png) 
+
+        ```shell 
+        # remove a configured repository
+        helm repo remove
+        ```
+        ![remove](/static/images/blog/helm-charts-basics/p4.png)  
+
+        ```shell 
+        # search a repository for a chart
+        helm search repo [NAME]
+        ```
+        ![search](/static/images/blog/helm-charts-basics/p5.png) 
+
+    - managing releases
+        ```shell
+        # install a chart
+        helm install [RELEASE] [CHART]
+        ```
+        ![install](/static/images/blog/helm-charts-basics/p6.png)  
+        ![k8](/static/images/blog/helm-charts-basics/p7.png)  
+
+        >Installing a chart deploys the corresponding Kubernetes resources and creates a Helm release. Now, we will focus on managing this Helm release effectively.
+        
+        ![new release](/static/images/blog/helm-charts-basics/p8.png)
+        > a new release is made with version 1
+        ```shell 
+        # upgrade a release with new updates in chart
+        helm upgrade [RELEASE] [CHART]
+        ```
+        ![upgrade](/static/images/blog/helm-charts-basics/p9.png)
+        > after the upgrade, the revision is at 2
+
+        ```shell
+        # rollback a release to a previous version
+        helm rollback [RELEASE] [REVISION]
+        ```
+        
+        ```shell 
+        # view list of operations performed on a release
+        helm history [RELEASE]
+        ```
+        ![history](/static/images/blog/helm-charts-basics/p10.png)
+        >We can see audit-trail of changes happening to a release from updated to rollbacks
+
+        ```
+        # remove all the kuberneters objects associated with this release
+        helm uninstall [RELEASE]
+        ```
+
+# Custom charts
+    Custom Helm charts are user-defined charts created to package and deploy your specific applications or services on Kubernetes. 
+    
+    These charts allow you to define your own Kubernetes resources, configurations, and Helm-specific templates to meet your application's needs.
+
+    Let’s start by creating a very basic Helm chart to deploy Nginx.
+
+    - **Create a Folder:** Begin by creating a folder for your chart. In this example, we'll name it nginx-app.
+    - **Create a Chart.yaml File:** Inside the folder, create a file named `Chart.yaml`. This file contains all the metadata for the chart.
+        
+        ```yaml:Chart.yaml
+        name: nginx-app
+        description: A basic nginx deployment
+        version: 0.1.0
+        ```
+    - **Create a file called values.yaml:** This file contains configurable values for the chart.
+
+        ```yaml:values.yaml 
+        replicaCount: 1
+        
+        image:
+            repository: nginx
+            tag: latest
+
+        service:
+            type: ClusterIP
+        port: 80
+        ```
+    - **create a folder named templates:**
+        
+        This folder will contain all the Kubernetes objects for your application.
+        All resources associated with nginx-app, such as Deployment, Service, etc., should be placed here.
+
+    - **In the templates folder, create a deployment.yaml file**
+    
+        ```yaml:/templates/deployment.yaml
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+        name: {{ .Release.Name }}-nginx #references the name of the release during the Helm deployment
+        spec:
+        replicas: {{ .Values.replicaCount }} #references values.yaml file
+        selector:
+            matchLabels:
+            app: nginx
+        template:
+            metadata:
+            labels:
+                app: nginx
+            spec:
+            containers:
+            - name: nginx
+                image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+                ports:
+                - containerPort: 80
+        ```
+        >The folder is named templates for a reason.
+        
+        It uses a template engine to make Kubernetes objects as configurable as possible. This is where the configuration values from `values.yaml` come into play.
+        
+        For example, you can reference a value like `{{ .Values.replicaCount }}`, allowing you to manage even large and complex charts with ease while maintaining uniformity across multiple charts.
+
+        ```yaml:/templates/service.yaml 
+        apiVersion: v1
+        kind: Service
+        metadata:
+        name: {{ .Release.Name }}-nginx
+        spec:
+        type: {{ .Values.service.type }}
+        ports:
+            - port: {{ .Values.service.port }}
+            targetPort: 80
+        selector:
+            app: nginx
+        ```
+
+        ```shell 
+        # install a chart from local file system
+        helm install my-nginx-app ./nginx-app
+        ```
+
+        ![custom chart install](/static/images/blog/helm-charts-basics/p11.png)
+
+
+    - **helm also provides us command to scaffold a new chart:**
+
+    ```shell
+    helm create nginx-app
+    ```
+
+    ```Scaffolded directory structure
+    nginx-app/
+    ├── Chart.yaml             # Metadata about the chart (name, version, etc.)
+    ├── values.yaml            # Default configuration values for templates
+    ├── charts/                # Directory for chart dependencies (if any)
+    ├── templates/             # Kubernetes resource templates
+    │   ├── tests/             # Test specifications (for Helm test hooks)
+    │   │   └── test-connection.yaml # Example test spec
+    │   ├── deployment.yaml    # Template for the Deployment resource
+    │   ├── service.yaml       # Template for the Service resource
+    │   ├── _helpers.tpl       # Template helper functions (e.g., reusable snippets)
+    │   ├── ingress.yaml       # Template for the Ingress resource (optional)
+    │   └── ...                # Other resource templates (e.g., ConfigMap, Secret, etc.)
+    └── README.md              # Documentation about the chart and its usage (optional but recommended)
+    ```
+    We already know some of this from manually creating files, so let’s explore some new files and folders:
+
+    - **charts/ folder**
+        - This folder is used to store dependency charts that your chart relies on.
+        - These are other Helm charts that your chart depends on to function properly.
+    
+    - **_helpers.tpl file**
+        - This file is used to define helper template functions that can be reused across multiple Kubernetes resource templates within the chart.
+        - It contains Go templating syntax to define reusable functions, which are invoked using `{{ include }}`.
+        - Functions in _helpers.tpl are typically defined using the define keyword.
+    
+        ```yaml:/templates/_helpers.tpl 
+        {{- define "app.fullname" -}}
+        {{- .Release.Name }}-{{ .Chart.Name }}-nginx
+        {{- end -}}
+
+        {{- define "app.labels" -}}
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app: nginx
+        {{- end -}}
+        ```
+
+
+        ```yaml:/templates/deployment.yaml 
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+            name: {{ include "app.fullname" . }}
+            labels:
+                {{ include "app.labels" . }}
+            spec:
+            .
+            .
+            .
+        ```
+
+    - **tests/ folder**
+        - This folder is commonly used to store Helm test hooks.
+        - Helm test hooks allow you to define tests that verify whether your chart has been deployed correctly and is functioning as expected.
+        - These tests can be run after the chart has been installed or upgraded to ensure that the application is behaving as intended.
+
+    ```yaml:/templates//tests/test-connection.yaml
+    apiVersion: v1
+    kind: Pod
+    metadata:
+        name: "{{ include "app.fullname" . }}-test-connection"
+        annotations:
+            "helm.sh/hook": test # 
+    spec:
+        containers:
+        - name: wget
+        image: busybox
+        command: ['wget']
+        args: ['{{ .Release.Name }}-nginx:{{ .Values.service.port }}']
+        restartPolicy: Never
+    ```
+
+    ```shell 
+    # start tests of the chart
+    helm test my-nginx-app
+    ```
+    ![test result](/static/images/blog/helm-charts-basics/p12.png)
+    >Test was a success
+
+<strong>Thanks for reading!</strong>
+
+
+
