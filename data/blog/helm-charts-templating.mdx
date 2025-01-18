@@ -1,0 +1,200 @@
+---
+title: 'Helm Charts: Templating'
+date: '2025-01-18'
+lastmod: '2025-01-18'
+tags: ['helm']
+draft: false
+summary: 'Master core templating concepts'
+---
+
+# Introduction
+
+Templating in Helm enables you to dynamically generate Kubernetes manifests using **Go templates**. Instead of hardcoding values (e.g., replicas, image tags), you can use placeholders and inject values from a `values.yaml` file or directly from the command line during deployment. 
+
+This makes charts **flexible**, **reusable**, and **environment-agnostic**.
+
+Key Features of Helm Templating:
+- **Dynamic Resource Creation:** Templates generate Kubernetes YAML dynamically based on input values.
+- **Reusable Snippets:** Helper templates allow code reuse and easier maintenance.
+- **Customization:** Values from `values.yaml` or overrides provide tailored configurations for different environments (e.g., dev, staging, production).
+- **Logic and Conditionals:** Add loops, conditionals, and functions to your templates for complex customizations.
+
+Helm templating bridges the gap between static YAML files and the dynamic nature of application environments, making Kubernetes resource management simpler and more efficient.
+
+# Built in objects
+
+built-in objects are pre-defined objects that provide access to various types of data during the rendering process. These objects make it easier to template Kubernetes manifests and manage Helm charts dynamically. 
+
+Below is a list of common built-in objects in Helm:
+- **Release:** Contains information about the release (e.g., name, namespace, and revision).
+- **Values:** Represents the values passed into the chart, either from `values.yaml` or via `--set`
+- **Chart:** Provides metadata about the chart
+- **Files:** Gives access to non-template files in the charts directory.
+- **Capabilities:** Provides information about the Kubernetes cluster's capabilities
+
+```yaml:config-map.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  namespace: {{ .Release.Namespace }}
+data:
+  app_version: {{ .Chart.Version }}
+  cluster_version: {{ .Capabilities.KubeVersion.Version }}
+```
+
+```shell
+# Run following command to see the changes
+helm install app ./app OR helm upgrade app ./app # install new or update existing release
+kubectl get configmap app-config -oyaml # view details of the config map
+```
+![basic](/static/images/blog/helm-charts-templating/p1.png)
+
+# Variables, Conditionals And Range
+
+- **Variables:** Define variables with `{{- $var := value -}}` and reuse them in templates, e.g., app_environment: `{{ $env | quote }}`.
+- **Conditionals:** Use `if`, `else if`, and `else` to handle logic, e.g., render resources based on `.Values`.
+- **Range:** Loop through lists/maps with range, e.g., `{{- range $key, $value := .Values.config -}}`.
+
+```yaml:config-map.yaml 
+{{- $serviceName := .Release.Name }} # Basic variable definition
+{{- $fullName := printf "%s-%s" .Release.Name .Chart.Name }} # Interpolation
+{{- $isProd := eq .Values.environment "production" }} # DRY 
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  namespace: {{ .Release.Namespace }}
+data:
+  app_version: {{ .Chart.Version }}
+  cluster_version: {{ .Capabilities.KubeVersion.Version }}
+  service_name: {{ $serviceName }}
+  full_name: {{ $fullName }}
+  {{- if $isProd }} # Conditionally create section of the k8s object
+  priority: Highest
+  {{- else  }}
+  priority: Low
+  {{- end }} 
+  {{- range $key, $value := .Values.config.data }} # Looping
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+```
+
+```yaml:values.yaml
+config:
+  config-name: "app-config"
+  data:
+    key1: "value1"
+    key2: "value2"
+
+environment: "dev"
+
+redis:
+  enabled: false
+  auth:
+    password: "securepassword"
+```
+
+![basic](/static/images/blog/helm-charts-templating/p2.png)
+
+# Functions 
+   Helm templates provide several built-in functions that can be used to manipulate values, perform logic, and format output. 
+   
+   Below are some commonly used template functions:
+   - **quote:** Quotes a string.
+      ```yaml
+      {{ .Values.name | quote }}
+      ```
+   - **default:** Provides a default value if the value is empty or not set.
+      ```yaml
+      {{ .Values.name | default "default-name" }}
+      ```
+   - **len:** Returns the length of a string, list, or map.
+      ```yaml
+      {{ len .Values.items }}
+      ```
+   - **required:** Ensures a value is provided; otherwise, it throws an error. 
+      ```yaml
+      {{ required "Value for name is required" .Values.name }}
+      ```
+   - **cat:** Concatenates multiple strings. 
+      ```yaml
+      {{ .Values.firstName | cat " " .Values.lastName }}
+      ```
+   - **and:** Logical AND. 
+      ```yaml
+      {{ and (eq .Values.env "prod") (eq .Values.region "us-east-1") }}
+      ```
+   - **split:** Splits a string into a list by a delimiter.
+      ```yaml
+      {{ .Values.name | split "-" }}
+      ```
+   - **index:** Accesses a specific element in a list or map. 
+      ```yaml
+      {{ index .Values.items 0 }}  # First item
+      ```
+   - **add:** Adds two values. 
+      ```yaml
+      {{ add 2 3 }}  # Result: 5
+      ```
+   - **date:** Formats the current date.
+      ```yaml
+      {{ now | date "2006-01-02" }}
+      ```
+
+
+# Dependencies 
+   they allow one chart to rely on another for shared resources or functionality. This feature makes it easy to reuse and manage related components.
+
+   - Definition 
+      ```yaml:Chart.yaml 
+      .
+      .
+      .
+      dependencies:
+         - name: redis
+            version: "17.0.0"
+            repository: "https://charts.bitnami.com/bitnami"
+      ```
+
+      ```shell 
+      # fetches the specified charts from their repositories and puts them in charts/ directory
+      helm dependency update
+      ```
+
+      ![basic](/static/images/blog/helm-charts-templating/p3.png)
+
+      ![basic](/static/images/blog/helm-charts-templating/p4.png)
+
+
+# Debugging  
+   - **Dry run:** 
+      The helm install and helm upgrade commands have a `--dry-run` option to simulate the release without actually applying it to the Kubernetes cluster.
+
+      ```shell 
+      helm install my-release ./app --dry-run
+      ```
+
+      ![basic](/static/images/blog/helm-charts-templating/p5.png)
+
+   - **flag --debug:**
+      The `--debug` flag with helm commands provides detailed output
+
+      ```shell 
+      helm template ./app --debug
+      ```
+
+      ![basic](/static/images/blog/helm-charts-templating/p6.png)
+
+   - **Linting:**
+      Use helm lint to validate the chart's structure and ensure it meets Helm's best practices.
+
+      ```shell 
+      helm lint ./app
+      ```
+
+      ![basic](/static/images/blog/helm-charts-templating/p7.png)
+
+<strong>Thanks for reading!</strong>
+
+
