@@ -121,12 +121,15 @@ Browsers implement the Same-Origin Policy to protect users from malicious websit
 
     -   **Key Reasons for Preflight**
             -   **Protect user data and server state**
+
                 It ensures the server explicitly consents to complex operations, preventing unauthorized actions initiated from malicious sites.
 
             -   **Allow servers to restrict access**
+
                 Servers can control exactly which methods and headers they accept, limiting their surface area for attacks.
 
             -   **Avoid unnecessary requests**
+            
                 For simple requests, no preflight is needed, so things stay fast and efficient.
 
         **Before making the actual request, the browser sends:**
