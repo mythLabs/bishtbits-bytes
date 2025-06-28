@@ -45,7 +45,7 @@ This article dives deep into CORS—what it is, why it exists, how it works, and
 
 ---
 
-## Why Do We Need CORS?
+## Why Do You Need CORS?
 
     The **Same-Origin Policy** security mechanism enforced by web browsers protects your web app by default, but it also restricts access to APIs or resources from other domains. 
     
@@ -234,11 +234,11 @@ However, no CORS headers are required in the response for same-origin requests.
 
 ---
 
-## Example
+## Example Code
 
 All the source code from this blog is available [here](https://github.com/mythLabs/blog-content/tree/main/cors).
 
-**We will create two servers:**
+**You will create two servers:**
     -   **A backend server** running on http://localhost:4000, which serves REST APIs using Express.
 
     -   **A frontend server** running on http://localhost:3000, also using Express, which serves an HTML page and a REST API.
@@ -357,17 +357,17 @@ app.listen(port, () => {
 </body>
 </html>
 ```
-## Same Domain Request 
+- **Same Domain Request**
 ![simple CORS request](/static/images/blog/cors/p3.png)
-> On clicking the "Same-Domain Request" button, we can see that the /simple endpoint is called within the same domain, so no CORS headers are required by the browser.
+> On clicking the "Same-Domain Request" button, you can see that the /simple endpoint is called within the same domain, so no CORS headers are required by the browser.
 
-## Cross Domain Simple Request 
+- **Cross Domain Simple Request**
 ![simple CORS request](/static/images/blog/cors/p4.png)
-> On clicking "Cross-Domain Simple", we can see that the /simple endpoint is called, but the domain is https://localhost:4000. Therefore, CORS headers are required by the browser.
+> On clicking "Cross-Domain Simple", you can see that the /simple endpoint is called, but the domain is https://localhost:4000. Therefore, CORS headers are required by the browser.
 
-## Cross Domain With Preflight
+- **Cross Domain With Preflight**
 ![simple CORS request](/static/images/blog/cors/p5.png)
-> On clicking "Cross-Domain Preflight", we can see that a preflight request is made, and if it is successful, the actual API call is performed.
+> On clicking "Cross-Domain Preflight", you can see that a preflight request is made, and if it is successful, the actual API call is performed.
 
 ![simple CORS request](/static/images/blog/cors/p6.png)
 ![simple CORS request](/static/images/blog/cors/p7.png)
