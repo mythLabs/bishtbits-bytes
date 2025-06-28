@@ -1,0 +1,378 @@
+---
+title: 'Understanding CORS'
+date: '2025-06-28'
+lastmod: '2025-06-28'
+tags: ['security']
+draft: false
+summary: 'Deep dive into CORS'
+---
+
+## Introduction
+
+Whether you're a frontend developer making an API call or a backend engineer handling API security, [CORS](https://en.wikipedia.org/wiki/Cross-origin_resource_sharing) (Cross-Origin Resource Sharing) is something you'll inevitably face. 
+
+This article dives deep into CORS—what it is, why it exists, how it works, and how to configure it securely.
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+---
+
+##  What is CORS?
+
+**CORS (Cross-Origin Resource Sharing)** is a **security feature implemented by web browsers** to control how resources hosted on one domain (origin) can be requested from another domain.
+
+- **Imagine you have:**
+
+    - **Frontend hosted at:** `https://myfrontend.com`
+    - **Backend API at:** `https://myapi.com`
+
+    When your frontend tries to fetch data using:
+
+    ```js
+    fetch('https://myapi.com/data')
+    ```
+
+    The browser checks if this **cross-origin request** is allowed. That’s where CORS comes in.
+
+---
+
+## What is a Cross-Origin Request?
+
+    Two URLs have **different origins** if they differ in:
+
+    - **Protocol** (`http` vs `https`)
+    - **Domain** (`example.com` vs `api.example.com`)
+    - **Port** (`:3000` vs `:8000`)
+
+---
+
+## Why Do We Need CORS?
+
+    The **Same-Origin Policy** security mechanism enforced by web browsers protects your web app by default, but it also restricts access to APIs or resources from other domains. 
+    
+    **CORS loosens** this restriction in a controlled way, allowing secure cross-origin communication.
+
+---
+
+## How CORS Works – Under the Hood
+
+    When a cross-origin request is made, the browser sends an `Origin` header:
+
+    ```
+    Origin: https://myfrontend.com
+    ```
+
+    The server must respond with:
+
+    ```
+    Access-Control-Allow-Origin: https://myfrontend.com
+    ```
+
+    If the headers are correct, the browser allows access to the response. If not, it blocks it.
+
+---
+
+## Types of CORS Requests
+
+    -   **Simple Requests**
+
+        Must meet **all** of the following:
+
+        - **Methods:** `GET`, `POST`, or `HEAD`
+        - **Content-Type:** `application/x-www-form-urlencoded`, `text/plain`, `multipart/form-data`
+        - No custom headers
+
+        **No preflight required**
+        ![simple CORS request](/static/images/blog/cors/p1.png)
+
+    -   **Preflighted Requests**
+
+        These require a **preflight OPTIONS** request when:
+
+        - Using unsafe HTTP methods (e.g. `PUT`, `DELETE`)
+        - Using custom headers (e.g. `Authorization`)
+        - Using non-simple `Content-Type` (e.g. `application/json`)
+        ![simple CORS request](/static/images/blog/cors/p2.png)
+
+---
+
+## Preflight Request Explained
+
+Browsers implement the Same-Origin Policy to protect users from malicious websites that might try to perform unsafe actions on their behalf (like sending data or modifying resources on another domain).
+
+    -   **Simple vs Complex Requests**
+            
+            **Simple requests** (like basic GET or POST with standard headers) are considered safe.
+
+            **Complex requests** (e.g., those with custom headers, methods like PUT/DELETE, or non-standard content types) could potentially be unsafe or have side effects.
+
+    -   **Preflight Requests Are a Safety Check**
+            
+            When a browser detects a complex cross-origin request, 
+            
+            **it first sends a preflight OPTIONS request to the server asking:**
+
+            `Hey server, am I allowed to send this actual request with method X and headers Y?`
+
+            **The server responds saying:**
+
+            `Yes, you are allowed` (or not).
+
+            **Only then does the browser send the real request.**
+
+    -   **Key Reasons for Preflight**
+            -   **Protect user data and server state**
+                It ensures the server explicitly consents to complex operations, preventing unauthorized actions initiated from malicious sites.
+
+            -   **Allow servers to restrict access**
+                Servers can control exactly which methods and headers they accept, limiting their surface area for attacks.
+
+            -   **Avoid unnecessary requests**
+                For simple requests, no preflight is needed, so things stay fast and efficient.
+
+        **Before making the actual request, the browser sends:**
+
+        ```
+        OPTIONS /api/data HTTP/1.1
+        Origin: https://example.com
+        Access-Control-Request-Method: PUT
+        Access-Control-Request-Headers: Authorization, Content-Type
+        ```
+
+        **Server must respond with:**
+
+        ```
+        Access-Control-Allow-Origin: https://example.com
+        Access-Control-Allow-Methods: GET, POST, PUT
+        Access-Control-Allow-Headers: Authorization, Content-Type
+        ```
+
+        **Then the actual request is made.**
+
+---
+
+##  Does the Browser Send the `Origin` Header on Same-Origin Requests?
+
+Yes — especially for JavaScript-initiated `POST`, `PUT`, `DELETE` requests or those with custom headers. These may include the `Origin` header **even for same-origin** requests.
+
+However, no CORS headers are required in the response for same-origin requests.
+
+---
+
+## All CORS Headers Explained
+
+    -   **Request Headers**
+
+        | Header | Purpose |
+        |--------|---------|
+        | `Origin` | Identifies the source origin |
+        | `Access-Control-Request-Method` | Declares HTTP method for actual request |
+        | `Access-Control-Request-Headers` | Declares custom headers for actual request |
+
+    -   **Response Headers**
+
+        | Header | Purpose |
+        |--------|---------|
+        | `Access-Control-Allow-Origin` | Specifies allowed origin |
+        | `Access-Control-Allow-Methods` | Lists allowed HTTP methods |
+        | `Access-Control-Allow-Headers` | Lists allowed custom headers |
+        | `Access-Control-Allow-Credentials` | Allows credentials (cookies, auth headers) |
+        | `Access-Control-Expose-Headers` | Allows extra headers to be read by JS |
+        | `Access-Control-Max-Age` | Caches preflight response |
+
+---
+
+## Best Practices for Setting Up CORS on the Backend
+
+    -   **Use a Whitelist for Allowed Origins**
+
+        ```js
+        const allowedOrigins = ['https://myfrontend.com'];
+        app.use(cors({
+        origin: (origin, callback) => {
+            if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+            } else {
+            callback(new Error('Not allowed by CORS'));
+            }
+        }
+        }));
+        ```
+
+    -   **Be Explicit About Allowed Methods**
+
+        ```http
+        Access-Control-Allow-Methods: GET, POST
+        ```
+
+    -   **Limit Custom Headers**
+
+        ```http
+        Access-Control-Allow-Headers: Content-Type, Authorization
+        ```
+
+    -   **Avoid `Access-Control-Allow-Credentials: true` Unless Necessary**
+
+        ```http
+        Access-Control-Allow-Credentials: true
+        ```
+        - When credentials (cookies, HTTP authentication, client certificates) are allowed, the browser includes user authentication info automatically with cross-origin requests.
+            
+            This can expose your API to Cross-Site Request Forgery (CSRF) attacks if not properly protected.
+            It increases the risk that malicious sites could perform actions on behalf of logged-in users.
+
+    -   **Must use a specific origin, not `*`.**
+
+    -   **Set `Access-Control-Max-Age` to Cache Preflights**
+
+        ```http
+        Access-Control-Max-Age: 86400
+        ```
+
+    -   **Validate the `Origin` on Sensitive Routes**
+
+            Double-check `Origin` or `Referer` headers before accepting write operations.
+
+---
+
+## Example
+
+All the source code from this blog is available [here](https://github.com/mythLabs/blog-content/tree/main/cors).
+
+**We will create two servers:**
+    -   **A backend server** running on http://localhost:4000, which serves REST APIs using Express.
+
+    -   **A frontend server** running on http://localhost:3000, also using Express, which serves an HTML page and a REST API.
+
+```js:be-server/servar.js
+import express from 'express';
+
+const app = express();
+const port = 4000;
+
+app.use(express.json());
+
+//Cors handler
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = ['http://localhost:3000'];
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Custom-Header');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204); // preflight success
+  }
+
+  next();
+});
+
+app.get('/simple', (req, res) => {
+  res.json({ message: 'Simple GET request success!' });
+});
+
+app.post('/custom-header', (req, res) => {
+  res.json({ message: 'POST with custom headers success!', data: req.body });
+});
+
+app.listen(port, () => {
+  console.log(`🟢 Backend running at http://localhost:${port}`);
+});
+```
+
+```js:fe-server/servar.js
+import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const app = express();
+const port = 3000;
+
+// Resolve __dirname in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+app.use(express.static(__dirname)); // serve index.html
+
+//To simulate a REST API call from the same domain
+app.get('/simple', (req, res) => {
+  res.json({ message: 'Simple GET request success!' });
+});
+
+app.listen(port, () => {
+  console.log(`🟢 Frontend running at http://localhost:${port}`);
+});
+```
+
+```html:fe-server/index.html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>CORS Demo</title>
+</head>
+<body>
+  <h1>CORS Demo (Frontend)</h1>
+
+  <button onclick="sameDomainRequest()">Same-Domain Request</button>
+  <button onclick="crossDomainSimple()">Cross-Domain Simple</button>
+  <button onclick="crossDomainPreflight()">Cross-Domain Preflight</button>
+
+  <script>
+    const BACKEND = 'http://localhost:4000';
+
+    function sameDomainRequest() {
+    //No host is specified, so it defaults to the URL serving it—localhost:3000
+    //thus simulating a same-domain API call.
+      fetch('/simple') 
+        .then(res => res.json())
+        .then(console.log)
+        .catch(console.error);
+    }
+
+    function crossDomainSimple() {
+      fetch(`${BACKEND}/simple`)
+        .then(res => res.json())
+        .then(console.log)
+        .catch(console.error);
+    }
+
+    function crossDomainPreflight() {
+      fetch(`${BACKEND}/custom-header`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer xyz123',
+          'Custom-Header': 'customValue'
+        },
+        body: JSON.stringify({ foo: 'bar' }),
+        credentials: 'include' // needed if backend allows credentials
+      })
+        .then(res => res.json())
+        .then(console.log)
+        .catch(console.error);
+    }
+  </script>
+</body>
+</html>
+```
+## Same Domain Request 
+![simple CORS request](/static/images/blog/cors/p3.png)
+> On clicking the "Same-Domain Request" button, we can see that the /simple endpoint is called within the same domain, so no CORS headers are required by the browser.
+
+## Cross Domain Simple Request 
+![simple CORS request](/static/images/blog/cors/p4.png)
+> On clicking "Cross-Domain Simple", we can see that the /simple endpoint is called, but the domain is https://localhost:4000. Therefore, CORS headers are required by the browser.
+
+## Cross Domain With Preflight
+![simple CORS request](/static/images/blog/cors/p5.png)
+> On clicking "Cross-Domain Preflight", we can see that a preflight request is made, and if it is successful, the actual API call is performed.
+
+![simple CORS request](/static/images/blog/cors/p6.png)
+![simple CORS request](/static/images/blog/cors/p7.png)
+
+
+> CORS may seem complicated at first, but it’s one of the browser’s most important security tools. By understanding its mechanics and following best practices, you can build APIs that are both secure and developer-friendly.
+
+Thanks for reading!
