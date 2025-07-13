@@ -1,0 +1,229 @@
+---
+title: 'Distributed Systems'
+date: '2025-07-13'
+lastmod: '2025-07-13'
+tags: ['distributed system', 'concepts']
+draft: false
+summary: 'Why They’re Awesome and Hard'
+---
+
+# Introduction
+
+**Distributed systems** power nearly every modern application that requires `scale`, `fault tolerance`, and `global reach` — from cloud databases to streaming platforms to container orchestration frameworks. Yet, despite their ubiquity, building reliable and performant distributed systems remains one of the most challenging engineering endeavors.
+
+![distributed-system](/static/images/blog/distributed-systems-explained/2.png)
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+---
+
+## What is it?
+
+>A distributed system consists of a set of independent computational entities (called nodes or processes), running on physically separate machines, that coordinate their actions by exchanging messages over a network, to achieve a common goal.
+
+- **Key properties:**
+
+    - **Concurrency:** Multiple nodes operate concurrently.
+
+    - **No shared memory:** Communication happens solely via message passing.
+
+    - **Lack of a global clock:** Nodes have independent clocks, which may not be synchronized.
+
+    - **Independent failures:** Nodes and communication links can fail independently.
+
+    - Distributed systems abstract away the physical distribution so users see the system as a single cohesive service or application.
+
+---
+
+## Examples of Distributed Systems in Production
+| System              | Architecture                    | Use Case & Description                                          |
+| ------------------- | ------------------------------- | --------------------------------------------------------------- |
+| **Kubernetes**      | Control plane + worker nodes    | Orchestrates containers across clusters with fault tolerance.   |
+| **Google Search**   | Sharded + replicated indexes    | Large-scale web crawling, indexing, and query serving.          |
+| **Apache Kafka**    | Distributed log-based messaging | High-throughput, fault-tolerant event streaming system.         |
+| **Amazon DynamoDB** | AP distributed NoSQL database   | Highly available, partition-tolerant key-value store.           |
+| **Netflix**         | Microservices + CDN             | Globally distributed video streaming and recommendation engine. |
+
+
+---
+
+## Why Do We Need them ?
+    - **Scalability:** Scale horizontally by adding more machines to handle increased load.
+
+    - **Fault Tolerance:** Redundancy enables the system to keep running despite individual node failures.
+
+    - **Geographical Distribution:** Serve global users with low latency by placing nodes closer to users.
+
+    - **Modularity & Isolation:** Separate services into independently deployable components (microservices).
+
+---
+
+##  Core Challenges & possible solutions
+
+### 1. **Unreliable Networks**
+
+>**Problem:** Networks are prone to message loss, delay, duplication, and out-of-order delivery.
+
+![unreliable-network](/static/images/blog/distributed-systems-explained/3.png)
+
+**Solution Approaches:**
+
+- **Idempotency:** Design operations so that retrying them multiple times has no adverse effects. For example, use unique request IDs to deduplicate.
+
+- **Retries with Exponential Backoff:** Retry failed requests with increasing delays to avoid overwhelming the network.
+
+- **Circuit Breakers:** Detect repeated failures and temporarily stop sending requests to a failing service to prevent cascading failures.
+
+- **Reliable Messaging Protocols:** Use TCP for ordered delivery, or implement acknowledgment/retransmission at the application level.
+
+- **Message Queues:** Systems like Kafka or RabbitMQ buffer messages reliably, decoupling producers and consumers.
+
+---
+
+### 2. **Partial Failures**
+
+>**Problem:** Some nodes or network links fail, while others remain operational, making it difficult to detect failure or maintain availability.
+
+**Solution Approaches:**
+
+- **Failure Detection Algorithms:** Use `heartbeat protocols` or `gossip protocols` to monitor node health and detect failures quickly.
+
+- **Replication:** Keep multiple copies of data or services so other nodes can take over if one fails.
+
+- **Timeouts and Fallbacks:** Use timeouts to detect unresponsive services and fallbacks or degrade functionality gracefully.
+
+- **Quorum-based Writes/Reads:** Require majority (quorum) confirmation to ensure data durability despite some node failures.
+
+---
+
+### 3. **CAP Theorem Trade-offs**
+
+> **Problem:** During network partitions, you must choose between consistency and availability.
+
+![cap-theorem](/static/images/blog/distributed-systems-explained/1.png)
+
+**Solution Approaches:**
+
+- **Choose Based on Use Case:**
+
+  - For critical data consistency (e.g., bank transactions), favor `CP systems`.
+
+  - For high availability with eventual consistency (e.g., social feeds), favor `AP systems`.
+
+- **Use Consensus Algorithms for CP Systems:**
+
+  - Algorithms like `Raft` or `Paxos` coordinate nodes to agree on the order of operations.
+
+- **Eventual Consistency Patterns:**
+
+  - Implement conflict resolution with `CRDTs` or application-level reconciliation.
+
+- **Hybrid Approaches:**
+
+  - Use `tunable consistency` settings (e.g., Cassandra’s consistency levels) to balance C and A dynamically.
+
+
+---
+
+### 4. **Data Consistency Models**
+
+>**Problem:** Strong consistency is costly and often unavailable in distributed environments.
+
+**Solution Approaches:**
+
+- **Choose the Right Model:**
+
+  - Strong consistency for coordination and leader election (ZooKeeper, etcd).
+
+  - Eventual consistency for high throughput, scale, and availability.
+
+- **Conflict Resolution:**
+
+  - Use `vector clocks` or `version vectors` to detect conflicting updates.
+
+  - Employ `CRDTs` (Conflict-free Replicated Data Types) to merge concurrent updates automatically.
+
+- **Session Guarantees:**
+
+  - Ensure that clients read their own writes (session consistency) when needed.
+
+---
+
+### 5. **Clock Synchronization and Ordering**
+
+>**Problem:** Distributed nodes have unsynchronized clocks, complicating event ordering.
+
+**Solution Approaches:**
+
+- **Logical Clocks:**
+
+  - Use `Lamport timestamps` to impose a partial order on events.
+
+  - Use `vector clocks` to track causal relationships.
+
+- **Physical Clock Sync:**
+
+  - Synchronize clocks periodically with NTP/PTP to reduce drift, while understanding it’s not perfect.
+
+- **Event Ordering Algorithms:**
+
+  - Use consensus and sequencing protocols (e.g., Raft log replication) to serialize events.
+
+---
+
+### 6. **Consensus**
+
+>**Problem:** Agreeing on shared state or leader election in unreliable environments is complex.
+
+**Solution Approaches:**
+
+- **Use well-studied consensus protocols:**
+
+  - **Raft:** Easier to understand and implement, widely adopted (etcd, Consul).
+
+  - **Paxos:** More theoretical but used in Google’s Chubby.
+
+  - **Zab:** Used in ZooKeeper, optimized for leader-follower patterns.
+
+- Design for **quorum** to tolerate failures.
+
+- Minimize consensus scope to only what needs strong coordination to reduce overhead.
+
+---
+
+### 7.  **Debugging and Observability**
+
+>**Problem:** Bugs span services, are non-deterministic, and logs are scattered.
+
+![tracing](/static/images/blog/distributed-systems-explained/6.png)
+
+**Solution Approaches:**
+
+- **Distributed Tracing:** Use `OpenTelemetry`, `Jaeger`, or `Zipkin` to trace requests across services.
+
+- **Centralized Logging:** Aggregate logs with `ELK (Elasticsearch, Logstash, Kibana)` or similar.
+
+- **Metrics and Alerts:** Use `Prometheus` and `Grafana` to monitor system health.
+
+- **Correlation IDs:** Tag requests and logs with unique IDs to trace through components.
+
+---
+
+### 8. **Deployment and Upgrades**
+
+>**Problem:** Rolling out changes risks inconsistency and downtime.
+
+![blue-green](/static/images/blog/distributed-systems-explained/4.png)
+
+![canary](/static/images/blog/distributed-systems-explained/5.png)
+
+**Solution Approaches:**
+
+- **Blue/Green Deployments:** Deploy new version in parallel; switch traffic after validation.
+
+- **Canary Releases:** Gradually expose small user segments to new versions to monitor stability.
+
+- **Feature Flags:** Enable/disable features dynamically without redeploying.
+
+- **Backward Compatibility:** Design APIs and schemas to support old and new versions simultaneously.
+
+<strong>Thanks for reading!</strong>
