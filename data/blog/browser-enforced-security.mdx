@@ -1,0 +1,285 @@
+---
+title: 'Browser-Enforced Security'
+date: '2025-09-06'
+lastmod: '2025-09-06'
+tags: ['security']
+draft: false
+summary: 'The Invisible Shield'
+---
+# Introduction
+
+Web security is one of the most critical aspects of modern application
+development. Browsers act as the first line of defense for users by
+enforcing a variety of **security mechanisms**. 
+
+These mechanisms are designed to prevent malicious sites from stealing data, hijacking
+sessions, or executing unauthorized scripts.
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+------------------------------------------------------------------------
+
+## Same-Origin Policy (SOP)
+
+Browsers operate under the **Same-Origin Policy (SOP)**, which states
+that a script on one origin (a combination of scheme, host, and port)
+cannot access resources from another origin. For example:
+
+-   `https://example.com` is considered different from
+    `https://api.example.com`.
+-   `https://example.com:8080` is different from
+    `https://example.com:443`.
+
+This **default isolation** ensures that malicious websites cannot
+arbitrarily read data from other origins.
+
+However, real-world applications often need controlled cross-origin
+communication, which brings us to **CORS**.
+
+------------------------------------------------------------------------
+
+## Cross-Origin Resource Sharing (CORS)
+
+CORS is a mechanism that allows servers to specify which origins are
+permitted to access their resources. Without CORS, browsers block most
+cross-origin requests for security reasons.
+
+### How CORS Works:
+
+1.  **Preflight Requests** (using `OPTIONS` method):
+    -   For non-simple requests (e.g., `PUT`, `DELETE`, or custom
+        headers), the browser sends a preflight `OPTIONS` request.
+
+    -   The server responds with headers like:
+
+        ``` http
+        Access-Control-Allow-Origin: https://example.com
+        Access-Control-Allow-Methods: GET, POST, OPTIONS
+        Access-Control-Allow-Headers: Content-Type, Authorization
+        ```
+2.  **Simple Requests**:
+    -   For simple cases (like `GET` or `POST` with standard headers),
+        no preflight is needed.
+3.  **Credentialed Requests**:
+    -   To send cookies or authorization headers, the server must
+        explicitly allow it:
+
+        ``` http
+        Access-Control-Allow-Credentials: true
+        ```
+
+### Common Misconfigurations:
+
+-   Using `Access-Control-Allow-Origin: *` with
+    `Allow-Credentials: true` → **Not allowed** by browsers.
+-   Forgetting to restrict origins properly can open doors for data
+    leaks.
+
+**Best Practice**: Always restrict CORS to trusted origins and avoid
+wildcards for sensitive endpoints.
+
+>More detailed blog on CORS  [here](https://www.amitbrewscode.in/blog/cors)
+
+------------------------------------------------------------------------
+
+## Same-Site Cookies
+
+Cookies are central to maintaining user sessions, but they can be abused
+in **Cross-Site Request Forgery (CSRF)** attacks. To mitigate this,
+browsers introduced the **SameSite cookie attribute**.
+
+### SameSite Options:
+
+1.  **Strict**:
+    -   Cookie is sent only for same-site requests.
+    -   Most secure, but can break cross-site login flows.
+2.  **Lax** (Default in modern browsers):
+    -   Cookie is sent for top-level navigations (like clicking a link),
+        but not for background requests.
+3.  **None**:
+    -   Cookie is sent with all requests, but must be marked `Secure`
+        (HTTPS only).
+
+### Example:
+
+``` http
+Set-Cookie: sessionId=abc123; SameSite=Strict; Secure; HttpOnly
+```
+
+**Best Practice**: Use `Strict` or `Lax` wherever possible. Use
+`None` only when truly necessary.
+
+------------------------------------------------------------------------
+
+## Content Security Policy (CSP)
+
+CSP is a powerful browser feature to mitigate **Cross-Site Scripting
+(XSS)** and data injection attacks.
+
+### How CSP Works:
+
+-   Developers define which resources (scripts, images, styles) are
+    allowed to load.
+-   Browser blocks everything else.
+
+### Example Policy:
+
+``` http
+Content-Security-Policy: default-src 'self'; script-src 'self' https://apis.google.com
+```
+
+This ensures only scripts from your own origin and Google APIs can run.
+
+### Benefits of CSP:
+
+-   Prevents execution of injected scripts.
+-   Blocks loading of malicious third-party content.
+-   Supports reporting for violations (`report-uri` or `report-to`).
+
+**Best Practice**: Start with **Content-Security-Policy-Report-Only**
+to monitor violations before enforcing.
+
+------------------------------------------------------------------------
+
+## **X-Frame-Options / CSP frame-ancestors**
+
+Prevents **Clickjacking** by controlling whether a page can be embedded
+in an `<iframe>`.
+
+-   Example:
+
+    ``` http
+    X-Frame-Options: DENY
+    ```
+
+## **X-Content-Type-Options**
+
+Prevents MIME-type sniffing, reducing risk of content misinterpretation.
+
+``` http
+X-Content-Type-Options: nosniff
+```
+
+## **Referrer-Policy**
+
+Controls how much referrer information is shared during navigation.
+
+``` http
+Referrer-Policy: no-referrer-when-downgrade
+```
+
+## **Feature Policy (Permissions Policy)**
+
+Restricts access to APIs like camera, microphone, or geolocation.
+
+``` http
+Permissions-Policy: geolocation=(), microphone=()
+```
+
+------------------------------------------------------------------------
+
+## Advanced Browser Security Mechanisms
+
+### 1. **Subresource Integrity (SRI)**
+
+SRI ensures that files loaded from third-party CDNs (like scripts or
+styles) haven't been tampered with.\
+It uses cryptographic hashes to verify the integrity of resources.
+
+**Example:**
+
+``` html
+<script src="https://cdn.example.com/library.js"
+        integrity="sha384-oWq2...hash...9uR4"
+        crossorigin="anonymous"></script>
+```
+
+If the file's content doesn't match the hash, the browser blocks it.
+
+**Best Practice**: Always use SRI when loading external
+scripts/styles from CDNs.
+
+------------------------------------------------------------------------
+
+### 2. **Sandboxed Iframes**
+
+`<iframe>` elements can be sandboxed to isolate untrusted content.\
+The `sandbox` attribute restricts capabilities like script execution,
+form submission, or navigation.
+
+**Example:**
+
+``` html
+<iframe src="https://untrusted.com" sandbox="allow-scripts"></iframe>
+```
+
+-   By default, all powerful features are disabled.
+-   You can selectively allow features (e.g., `allow-scripts`,
+    `allow-forms`).
+
+**Best Practice**: Always sandbox third-party iframes to reduce risks
+from untrusted content.
+
+------------------------------------------------------------------------
+
+### 3. **Browser Isolation**
+
+Modern browsers (like Chrome's **Site Isolation**) run different origins
+in separate processes.\
+This limits the impact of attacks like **Spectre/Meltdown** by isolating
+memory between sites.
+
+-   Helps contain compromised sites.
+-   Adds another layer of defense against side-channel attacks.
+
+**Best Practice**: Rely on default browser isolation features and
+avoid disabling them for performance reasons.
+
+------------------------------------------------------------------------
+
+### 4. **Cross-Origin Opener Policy (COOP)**
+
+Ensures that a top-level browsing context is isolated from other origins by controlling how windows interact with each other.
+
+- With Cross-Origin-Opener-Policy: same-origin, the page gets its own browsing context group, preventing untrusted cross-origin pages from accessing window.opener.
+
+- Protects against side-channel leaks and Spectre-type vulnerabilities.
+
+**Example:**
+
+```http
+Cross-Origin-Opener-Policy: same-origin
+
+```
+
+------------------------------------------------------------------------
+### 5. **Cross-Origin Embedder Policy (COEP)**
+
+Ensures that all resources loaded by your page are explicitly marked as safe to be embedded.
+
+- With Cross-Origin-Embedder-Policy: require-corp, the browser requires resources (scripts, images, etc.) to opt-in via Cross-Origin-Resource-Policy (CORP) or CORS headers.
+
+- Prevents loading of cross-origin resources unless explicitly permitted.
+
+```http 
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+------------------------------------------------------------------------
+
+## Conclusion
+
+Modern browsers provide a robust set of **security mechanisms** to
+protect users against common web threats. Features like **CORS,
+SameSite, CSP, and security headers** enforce strict boundaries and
+minimize attack vectors.
+
+Advanced features like **Subresource Integrity, sandboxed iframes, and
+browser isolation** further harden the browser environment.
+
+As a developer, it's crucial to **understand, configure, and test**
+these mechanisms properly. Misconfigurations can weaken your app's
+security posture, while correct usage provides strong protection for
+your users.
+
+<strong>Thanks for reading!</strong>
