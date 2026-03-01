@@ -282,6 +282,109 @@ This is the algorithm most large-scale systems end up with. It fixes the boundar
 
 ---
 
+## Rate Limiting in a Distributed Environment
+
+Everything we've discussed so far assumes a single server with a single in-memory counter. The moment you run **multiple instances** of your service — which every production system does — things get significantly harder.
+
+### The Core Problem: Split Counters
+
+Imagine you have 3 server instances behind a load balancer, and your limit is 10 requests per minute per user.
+
+```
+User sends 10 requests →
+  Instance A handles 4  → counter: 4  ✅
+  Instance B handles 3  → counter: 3  ✅
+  Instance C handles 3  → counter: 3  ✅
+
+Total: 10 requests → but each instance thinks the user is well within limits.
+```
+
+Each instance only sees its own slice. The user effectively gets **3× the allowed quota**. This is the race condition at the heart of distributed rate limiting.
+
+---
+
+### Solution 1: Centralised Data Store (Redis)
+
+The most common fix is to move the counter out of each instance's memory and into a **shared store like Redis**.
+
+```
+User request → Any instance → Increment counter in Redis → Allow or Reject
+```
+
+Redis's atomic operations (`INCR`, `EXPIRE`, Lua scripts) ensure that no two instances double-count the same request.
+
+```
+-- Lua script executed atomically in Redis
+local count = redis.call("INCR", key)
+if count == 1 then
+  redis.call("EXPIRE", key, window_seconds)
+end
+return count
+```
+
+**Trade-off:** Redis becomes a single point of failure. Mitigate with Redis Sentinel or Redis Cluster. Also adds a network round-trip per request — keep latency in mind.
+
+---
+
+### Solution 2: Sticky Sessions (Consistent Hashing)
+
+Route each user's requests to the **same server instance** consistently, using consistent hashing on the user ID or IP at the load balancer level.
+
+```
+User A → always → Instance 1
+User B → always → Instance 2
+User C → always → Instance 3
+```
+
+Now each instance owns its users exclusively and local in-memory counters are accurate again.
+
+**Trade-off:** If an instance goes down, its users get rerouted and their counters reset — potentially allowing a burst. Also limits horizontal scalability since users aren't distributed evenly across instances.
+
+---
+
+### Solution 3: Approximate Local Counters with Periodic Sync
+
+Each instance maintains its own local counter and **periodically syncs** the delta to a central store (e.g., every 100ms). Instances read the global count from the store before making allow/reject decisions.
+
+```
+t=0ms   → Instance A: local=0, global=0
+t=50ms  → Instance A processes 5 requests → local=5
+t=100ms → Instance A syncs → global=5
+t=110ms → Instance B reads global=5 → allows up to 5 more
+```
+
+**Trade-off:** There's a window of inaccuracy between syncs. A user could exceed the limit briefly before all instances catch up. Acceptable for most use cases; not for financial or compliance-critical systems.
+
+---
+
+### Solution 4: Distributed Rate Limiting with a Sidecar / Service Mesh
+
+In Kubernetes environments, rate limiting is often offloaded to a **sidecar proxy** (like Envoy) or a **service mesh** (like Istio). Each pod has a sidecar that intercepts requests and communicates with a central rate limit service.
+
+```
+Request → Envoy Sidecar → Rate Limit Service (centralised) → Allow/Deny → App Container
+```
+
+This keeps rate limiting logic completely out of application code and centralises policy management.
+
+- **Envoy + Lyft's ratelimit service** is a popular open-source implementation of this pattern.
+- **Istio** supports rate limiting via its `EnvoyFilter` and `RequestAuthentication` resources.
+
+---
+
+### Choosing the Right Approach
+
+| Approach | Accuracy | Latency Impact | Complexity | Best For |
+|---|---|---|---|---|
+| **Redis centralised** | High | Low–Medium | Low | Most production systems |
+| **Sticky sessions** | High | None | Medium | Stateful, low-churn user bases |
+| **Local + periodic sync** | Approximate | None | Medium | High-throughput, tolerance for brief overruns |
+| **Sidecar / service mesh** | High | Low | High | Kubernetes-native microservices |
+
+> In most systems, **Redis with atomic Lua scripts** is the pragmatic default. It's battle-tested, simple to reason about, and handles the distributed counter problem cleanly.
+
+---
+
 Rate limiting might feel like a background concern, but picking the right algorithm directly impacts your API's reliability, fairness, and user experience. Now you know exactly what's ticking away behind that `429 Too Many Requests` response.
 
 <strong>Thanks for reading!</strong>
