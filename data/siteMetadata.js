@@ -3,7 +3,7 @@ const siteMetadata = {
   title: 'Software Engineering Blog',
   author: 'Amit Bisht',
   headerTitle: 'Amit.Brews.Code',
-  description: 'Preachings of an average tech bro',
+  description: 'Concepts over code. Ideas over implementations.',
   language: 'en-us',
   theme: 'system', // system, dark or light
   siteUrl: 'https://amitbrewscode.in',
