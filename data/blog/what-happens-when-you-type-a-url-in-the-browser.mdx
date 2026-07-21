@@ -1,0 +1,570 @@
+---
+title: 'What Happens When You Type a URL in the Browser'
+date: '2026-07-20'
+lastmod: '2026-07-20'
+tags: ['networking', 'system-design', 'web']
+draft: false
+summary: 'A beginner-friendly walkthrough from keystroke to painted page—what DNS, HTTPS, CDNs, and servers do, in plain language, with optional deep dives.'
+---
+
+# Introduction
+
+When you type `https://news.example.com/articles/42` and press Enter, it feels instant. Behind that one action, many programs on your computer and on the internet work together: figure out where the site lives, open a secure connection, ask for the page, run code on a server, send HTML back, and draw it on your screen.
+
+Think of it like ordering a book from a big chain library:
+
+1. You read the label on your request (the **URL**).
+2. You look up which branch is closest (**DNS**).
+3. You call them on a secure line (**HTTPS / TLS**).
+4. A nearby desk may already have a copy (**CDN cache**).
+5. If not, the main library finds the book, maybe from a fast shelf (**Redis**) or the archive (**database**).
+6. The book is sent back; your browser reads it and fetches the pictures and styles inside the pages.
+
+This post walks through those steps in order. You do not need networking or backend experience to follow the main sections. Sections marked **Go deeper** are optional—save them for when you are debugging slow pages or preparing for interviews.
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+------------------------------------------------------------------------
+
+## Quick glossary
+
+| Term | Plain meaning |
+|------|----------------|
+| **URL** | The address you type (scheme, site name, path, etc.). |
+| **DNS** | The internet’s “phone book”: turns `news.example.com` into numeric **IP addresses** computers use. |
+| **IP address** | A number that identifies a machine on the network (like `203.0.113.10`). |
+| **HTTPS** | HTTP plus **TLS**—data is encrypted so others on the network cannot easily read or tamper with it. |
+| **TLS / SSL** | The handshake that proves you reached the real site (via **certificates**) and sets up encryption. |
+| **CDN** | Copies of static files (and sometimes pages) stored in data centers **close to users** for speed. |
+| **Origin** | The company’s real servers (not the CDN copy). |
+| **Load balancer** | Distributes traffic across many server machines so one does not overload. |
+| **Reverse proxy** | A gateway (e.g. nginx) in front of the app that routes requests and adds security. |
+| **Cache** | A stored copy of data so the next request is faster. |
+| **TTFB** | **Time to First Byte**—how long until the first piece of the response arrives. |
+
+------------------------------------------------------------------------
+
+## The 30-Second Mental Model
+
+1. **Browser** — Reads the URL, checks local caches, decides how to connect.
+2. **DNS** — Finds IP address(es) for the site name.
+3. **Connect + encrypt** — Opens a channel (TCP or QUIC) and negotiates **HTTPS**.
+4. **CDN (if used)** — Serves a cached copy or forwards to the company’s servers.
+5. **Load balancer + proxy** — Sends the request to a healthy app server.
+6. **App + database** — Runs code, loads article data (often via **Redis** first).
+7. **Response** — HTML (and headers) travel back; the browser loads CSS, JS, images and **paints** the page.
+
+Each step can add delay or fail on its own (wrong DNS, expired certificate, overloaded server, etc.).
+
+------------------------------------------------------------------------
+
+## Step 1: Parsing and Normalizing the URL
+
+**Plain English:** The browser splits your text into parts—protocol, site name, path—and fixes small inconsistencies before asking the network for anything.
+
+Before any network call, the browser breaks the string into pieces ([WHATWG URL spec](https://url.spec.whatwg.org/)):
+
+| Part | Example | What it means |
+|------|---------|------|
+| Scheme | `https` | Use secure web (port 443 by default). |
+| Host | `news.example.com` | Site name (resolved via DNS). |
+| Port | (often omitted) | `443` for HTTPS, `80` for HTTP. |
+| Path | `/articles/42` | Which page on the site. |
+| Query | `?ref=home` | Extra parameters sent to the server. |
+| Fragment | `#comments` | **Not sent to the server**—only used in the browser (jump to section). |
+
+Useful rules:
+
+- **`https`** is chosen for secure sites; browsers may **upgrade** `http` to `https` if the site previously asked for that (**HSTS**).
+- International domain names are converted to a special ASCII form (**Punycode**) before DNS.
+- If you omit the path, the browser uses `/`.
+
+<details>
+<summary><strong>Go deeper — URL edge cases</strong></summary>
+
+- **Percent-encoding** — Spaces and special characters become `%20`, etc.; double-encoding breaks some servers.
+- **IPv6 addresses** — Written in brackets: `https://[2001:db8::1]/`.
+- **Public suffix** — Cookies treat `blog.example.co.uk` differently from `example.co.uk` (shared hosting rules).
+- **Omnibox** — Address bar may run safe-browsing checks and prefer HTTPS when possible.
+
+</details>
+
+------------------------------------------------------------------------
+
+## Step 2: Cache and Connection Reuse (Before DNS)
+
+**Plain English:** The browser asks: “Do I already have this page or a recent connection to this site?” If yes, it skips work and loads faster.
+
+### Browser HTTP cache
+
+The browser may already have a copy of the page or file on disk or in memory. Servers say how long a copy is valid with headers like `Cache-Control: max-age=3600` (one hour). If the copy is still **fresh**, no network request is needed. If it is old but checkable, the browser may ask “anything changed?” and get **304 Not Modified** instead of downloading again.
+
+### Service worker (optional)
+
+Some sites install a **service worker**—a script that can serve cached pages or pass the request to the network.
+
+### DNS cache
+
+Your computer may already remember “`news.example.com` → this IP” from a recent visit, so DNS can be very fast or skipped.
+
+### Reusing connections
+
+If you visited the site moments ago, the browser may reuse the same **TCP** connection and shorten the **TLS** (encryption) setup.
+
+Only when nothing reusable exists does the browser do a full DNS lookup and new connection.
+
+<details>
+<summary><strong>Go deeper — caches and prefetch</strong></summary>
+
+- **Partitioned cache** — Cached files from one site may not apply when the same URL is opened in another context (privacy feature).
+- **Back/forward cache (bfcache)** — Going **Back** may restore the page from memory without reloading.
+- **Preconnect / prefetch** — Pages can warm up DNS and connections before you click a link.
+- **Connection limits** — Browsers limit parallel connections per site; HTTP/2 and HTTP/3 multiplex many requests on one connection.
+
+</details>
+
+------------------------------------------------------------------------
+
+## Step 3: DNS Lookup
+
+**Plain English:** Computers talk using IP addresses, not names. DNS looks up “what IP belongs to `news.example.com`?”
+
+### How lookup works (simplified)
+
+1. Your browser or OS asks a **DNS resolver** (often your ISP or a public one like `8.8.8.8`).
+2. The resolver asks authoritative servers step by step: root → `.com` → `example.com` → record for `news`.
+3. You get **A** records (IPv4) and/or **AAAA** (IPv6)—the addresses your browser will connect to.
+
+Many sites use a **CNAME**: the name you type points to another name (often a **CDN**), and the resolver follows that chain until it gets IPs.
+
+```text
+news.example.com  →  (CNAME)  →  d123.cloudfront.net  →  IP addresses
+```
+
+CDNs often use **anycast**: the same IP is reachable from many locations worldwide, and routing sends you to a nearby **edge** server.
+
+### Caching
+
+DNS answers are cached at the browser, OS, and resolver with a **TTL** (time to live). Repeat visits are faster because the phone book entry is still remembered.
+
+### When DNS fails
+
+- **NXDOMAIN** — Name does not exist (typo or dead domain).
+- **SERVFAIL** — Resolver or server error (you may see “DNS probe finished” style errors in the browser).
+
+<details>
+<summary><strong>Go deeper — DNS</strong></summary>
+
+- **DoH / DoT** — Encrypt DNS queries to the resolver (privacy; same answers).
+- **DNSSEC** — Cryptographically signed DNS (extra tamper protection).
+- **Happy Eyeballs** — Browsers may try IPv6 and IPv4 in parallel.
+- **Split DNS** — VPN or corporate networks may return different IPs than the public internet.
+- **HTTPS DNS records** — Can advertise HTTP/3 and other hints.
+
+</details>
+
+------------------------------------------------------------------------
+
+## Step 4: Establishing Transport — TCP and QUIC
+
+**Plain English:** Before sending a web request, client and server must agree on a reliable way to send bytes back and forth. That is **TCP** (most common) or **QUIC** (used with HTTP/3).
+
+### TCP (used with HTTP/1.1 and HTTP/2)
+
+The famous **three-way handshake**:
+
+1. Client: “I want to connect” (`SYN`)
+2. Server: “OK, I’m ready” (`SYN-ACK`)
+3. Client: “Thanks, let’s go” (`ACK`)
+
+Only then does application data (like HTTPS) flow. Distance to the server (**RTT**, round-trip time) matters: farther away usually means more delay before the first byte (**TTFB**).
+
+### QUIC and HTTP/3
+
+**HTTP/3** uses **QUIC** over UDP instead of TCP. Encryption is built in, repeat visits can connect faster, and one slow file is less likely to block others on the same connection. If UDP is blocked, the browser falls back to TCP + HTTP/2.
+
+<details>
+<summary><strong>Go deeper — transport</strong></summary>
+
+- **Slow start / congestion control** — TCP ramps send speed based on network conditions.
+- **Keep-alive** — Reuses TCP for multiple requests.
+- **TCP Fast Open, Nagle, PMTU** — Tuning and edge cases that affect latency.
+- **QUIC connection IDs** — Helpful when switching Wi‑Fi to mobile without full reconnect.
+
+</details>
+
+------------------------------------------------------------------------
+
+## Step 5: TLS Handshake and Trust (HTTPS)
+
+**Plain English:** **TLS** (what people often call SSL) does two jobs: prove you are talking to the real server, and encrypt everything after that.
+
+After TCP (or as part of QUIC), the browser and server perform a **TLS handshake**. The browser checks:
+
+1. **Certificate** — A signed document chaining to a **trusted authority** in your OS/browser.
+2. **Name match** — Certificate must cover `news.example.com`.
+3. **Not expired** — And not revoked (browsers use OCSP stapling and related mechanisms).
+
+If anything fails, you see a certificate warning or error—not a normal page.
+
+**SNI (Server Name Indication)** tells the server which site you want when many sites share one IP—so it can pick the right certificate.
+
+| Where TLS ends | What it means for you |
+|----------------|------------------------|
+| CDN edge | You see the CDN’s certificate; CDN talks to origin separately. |
+| Load balancer | Same idea at the company’s front door. |
+| App server | Encryption all the way to nginx/Node/etc. |
+
+<details>
+<summary><strong>Go deeper — TLS</strong></summary>
+
+- **TLS 1.3** — Fewer round trips; modern ciphers with forward secrecy.
+- **Session resumption** — Faster repeat visits via tickets/PSK.
+- **ALPN** — Chooses HTTP/2 vs HTTP/1.1 during the handshake.
+- **Certificate Transparency, ECH, mTLS** — Enterprise and privacy extensions.
+
+</details>
+
+------------------------------------------------------------------------
+
+## Step 6: The HTTP Request
+
+**Plain English:** Over the encrypted connection, the browser sends a structured **request**: “Please give me `GET /articles/42` for host `news.example.com`.”
+
+Example (simplified):
+
+```http
+GET /articles/42 HTTP/2
+Host: news.example.com
+Accept: text/html,...
+Accept-Encoding: gzip, br
+Cookie: session_id=abc123
+```
+
+What matters for beginners:
+
+- **GET** — “Read this resource” (normal page load).
+- **Host** — Which site on a shared server.
+- **Cookies** — Small pieces of data the browser sends back (login session, preferences).
+- **Accept-Encoding** — Browser can decompress **gzip** or **Brotli** to save bandwidth.
+
+With **HTTP/2** (and HTTP/3), many requests (HTML, CSS, images) can share **one connection** as separate **streams** instead of opening dozens of connections.
+
+<details>
+<summary><strong>Go deeper — HTTP</strong></summary>
+
+- **Conditional requests** — `If-None-Match` / `If-Modified-Since` for cache validation.
+- **Redirects** — 301/302 chains add extra round trips.
+- **Sec-Fetch-*** headers — Browser tells the server how the request was initiated (security).
+- **POST body limits** — Large uploads may be rejected with **413** at a proxy.
+
+</details>
+
+------------------------------------------------------------------------
+
+## Step 7: CDN — Edge Caching
+
+**Plain English:** A **CDN** (Content Delivery Network) keeps copies of files in many cities. If your article is cached nearby, you get a fast response without hitting the company’s main servers.
+
+### Cache hit
+
+If the edge already has `/articles/42` (and caching rules allow it), you get **200 OK** immediately. Headers may say cache hit and **Age** (how long the copy sat in cache):
+
+```http
+X-Cache: Hit from cloudfront
+Cache-Control: public, max-age=3600
+Age: 842
+```
+
+### Cache miss
+
+The edge fetches from **origin** (your servers), may cache the response for next time, and returns it to you.
+
+### Other CDN jobs
+
+- **HTTPS** at the edge (certificates, HTTP/2/3)
+- **WAF** — Block common attacks and bad bots
+- **Compression** — gzip/Brotli
+- **DDoS protection** — Absorb huge traffic spikes
+
+**Cache key** — What goes into the key (path, query string, headers) explains “why my deploy still shows the old page” (forgot to **purge** CDN cache).
+
+<details>
+<summary><strong>Go deeper — CDN</strong></summary>
+
+- **Origin shield** — Mid-tier cache to protect origin from many edge misses.
+- **Surrogate-Key / cache tags** — Purge groups of URLs at once.
+- **Stale-while-revalidate** — Serve slightly old content while refreshing in background.
+- **Negative caching** — Sometimes 404/5xx are cached briefly (misconfig can hurt).
+
+</details>
+
+------------------------------------------------------------------------
+
+## Step 8: Load Balancer
+
+**Plain English:** Popular sites run **many** identical app servers. A **load balancer** picks one for each request so work is shared and a dead machine can be skipped.
+
+### Layer 4 vs Layer 7 (simple view)
+
+| Type | Thinks about | Good for |
+|------|----------------|----------|
+| **Layer 4** | IP and port only | Fast, generic TCP traffic |
+| **Layer 7** | HTTP: host, path, headers | Route `/api` vs `/admin`, canary releases |
+
+Common features: **health checks** (ping `/health`), **sticky sessions** (same user → same server), **SSL offload** (decrypt at LB, plain HTTP inside private network).
+
+See also: [Layer 4 Vs Layer 7 Load Balancer](/blog/layer-4-vs-layer-7-load-balancer) for a longer comparison.
+
+<details>
+<summary><strong>Go deeper — load balancing</strong></summary>
+
+- **Algorithms** — Round robin, least connections, consistent hash.
+- **X-Forwarded-For / PROXY protocol** — Preserve real client IP behind the LB.
+- **Kubernetes readiness** — Pods removed from rotation while shutting down.
+
+</details>
+
+------------------------------------------------------------------------
+
+## Step 9: Reverse Proxy (e.g. nginx)
+
+**Plain English:** A **reverse proxy** sits in front of your application code. It is the doorkeeper: routes URLs, limits abuse, compresses responses, and forwards to the right internal service.
+
+Typical jobs:
+
+- Send `/static/` to file storage; `/` to the app
+- **Rate limiting** and max upload size
+- **Gzip/Brotli**, timeouts
+- Add **X-Request-ID** for tracing one request through logs
+
+```nginx
+upstream app_servers {
+    least_conn;
+    server 10.0.1.10:8080;
+    server 10.0.1.11:8080;
+}
+```
+
+If the app is too slow, the proxy may return **504 Gateway Timeout** even though the app is still working.
+
+<details>
+<summary><strong>Go deeper — reverse proxy</strong></summary>
+
+- **Worker processes and upstream keepalive** — Handle many clients efficiently.
+- **Envoy / service mesh** — Retries, circuit breaking, outlier detection.
+
+</details>
+
+------------------------------------------------------------------------
+
+## Step 10: Application Server
+
+**Plain English:** Your **application** (Node, Java, Python, Go, etc.) handles the request: check login, load article 42, build HTML or JSON, send the response.
+
+Typical order:
+
+1. **Middleware** — Logging, auth, error handling
+2. **Router** — Match `GET /articles/42`
+3. **Authorization** — Is this user allowed to see it?
+4. **Handler** — Business logic
+5. **Response** — HTML template or JSON
+
+If too many requests arrive at once, you may see **503 Service Unavailable** or long waits.
+
+<details>
+<summary><strong>Go deeper — application runtime</strong></summary>
+
+- **Event loop vs thread pool** — How concurrency works in Node vs Java.
+- **DB connection pool** — Must match worker count or threads block waiting for DB.
+- **401 vs 403** — Not logged in vs not allowed.
+
+</details>
+
+------------------------------------------------------------------------
+
+## Step 11: Caching Inside the Origin
+
+**Plain English:** Before querying the **database**, the app often checks **Redis** or **Memcached**—“do we already have article 42 in memory?”
+
+```text
+GET article:42 from Redis
+  → found: return quickly
+  → not found: read from database, store in Redis, return
+```
+
+Patterns you will hear about:
+
+- **Cache-aside** — App reads cache first, loads DB on miss
+- **TTL** — Expire cached entries after N seconds
+- **Invalidation** — Delete cache keys when the article is updated
+
+Images and large files usually live in **object storage** (S3, GCS) and are served via CDN URLs in the HTML—not from the app’s local disk.
+
+<details>
+<summary><strong>Go deeper — origin cache</strong></summary>
+
+- **Cache stampede** — Many requests miss at once when a key expires; mitigated with singleflight/locking.
+- **Hot keys** — Viral content overloads one Redis shard.
+- **Align CDN TTL with Redis** — Avoid confusing “stale at edge, fresh at origin” behaviour.
+
+</details>
+
+------------------------------------------------------------------------
+
+## Step 12: Database and Persistence
+
+**Plain English:** On cache miss, the app reads from a **database** (PostgreSQL, MySQL, etc.)—the system of record for articles, users, and orders.
+
+Why **connection pooling**? Opening a DB connection is slow; apps reuse a pool of connections. If the pool is empty, requests wait or fail with errors that look random.
+
+Rough path for `SELECT` article 42:
+
+1. App sends SQL (often via an **ORM**)
+2. Database finds row (fast if indexed by **id**)
+3. Data may already sit in the DB’s own memory **buffer pool** (no disk read)
+4. Result goes back to the app to fill the HTML template
+
+Reads sometimes go to a **read replica** (copy of data) to spread load; copies can lag seconds behind the primary—rare but confusing right after an edit.
+
+Other systems (search, analytics, queues) often run **asynchronously**—not blocking your page view.
+
+<details>
+<summary><strong>Go deeper — database</strong></summary>
+
+- **N+1 queries** — ORM loads related rows one-by-one; fix with joins/eager load.
+- **EXPLAIN ANALYZE** — See if queries use indexes.
+- **PgBouncer, statement timeouts** — Capacity and safety knobs.
+
+</details>
+
+------------------------------------------------------------------------
+
+## Step 13: Response Travels Back
+
+**Plain English:** The server sends **status**, **headers**, and **body** (HTML). The bytes travel back through proxy, load balancer, CDN (which usually does not cache private pages), then TLS to your browser.
+
+Example headers:
+
+```http
+HTTP/2 200
+content-type: text/html; charset=utf-8
+content-encoding: br
+cache-control: private, no-store
+set-cookie: session_id=...; HttpOnly; Secure
+```
+
+- **200** — Success
+- **content-encoding: br** — Body compressed with Brotli
+- **cache-control: private, no-store** — Browsers should not store this in shared caches (typical for logged-in pages)
+- **set-cookie** — Browser stores cookie for next request
+
+**Compression** makes HTML smaller; **chunked** responses can start sending before the whole page is generated (streaming).
+
+<details>
+<summary><strong>Go deeper — response path</strong></summary>
+
+- **103 Early Hints** — Start loading CSS/fonts before final 200.
+- **Security headers** — CSP, HSTS, X-Frame-Options.
+- **Mis-cached personalized HTML** — Dangerous if `Cache-Control: public` on user-specific pages.
+
+</details>
+
+------------------------------------------------------------------------
+
+## Step 14: Browser — Parsing, Subresources, and Render
+
+**Plain English:** HTML is only the skeleton. The browser **parses** it, downloads **CSS**, **JavaScript**, and **images**, then **draws** the page.
+
+### Subresources
+
+Tags like `<link rel="stylesheet">`, `<script src="...">`, and `<img src="...">` trigger **more requests**. Same site often reuses the open connection, so these are faster than the first navigation.
+
+### From HTML to pixels (simplified)
+
+1. Build **DOM** (structure) and **CSSOM** (styles)
+2. **Layout** — Where each box sits on screen
+3. **Paint** — Fill in pixels
+4. **Composite** — GPU layers for smooth scrolling/animations
+
+CSS and blocking scripts can delay the first visible content. **`async`** and **`defer`** on scripts change when JavaScript runs.
+
+JavaScript may call **`fetch('/api/...')`** for more data—that is another trip to the server (with **CORS** rules if the API is on another domain).
+
+For security basics, see [Browser-Enforced Security](/blog/browser-enforced-security).
+
+<details>
+<summary><strong>Go deeper — rendering</strong></summary>
+
+- **Preload scanner** — Starts fetching assets before the parser reaches their tags.
+- **Core Web Vitals** — LCP, CLS, INP measure load and interactivity.
+- **SPA navigation** — After first load, client routers may fetch JSON instead of full HTML.
+
+</details>
+
+------------------------------------------------------------------------
+
+## How Long Does Each Part Take? (Rough Guide)
+
+Not a promise—just typical orders of magnitude for a global site on a **cache miss**:
+
+| Phase | Typical range | Beginner note |
+|-------|----------------|---------------|
+| DNS (cached) | 0–5 ms | “Phone book” already in memory |
+| DNS (uncached) | 20–120 ms | First visit or expired TTL |
+| Connect + TLS | ~1–3 round trips | Depends on distance to server |
+| CDN → origin | Extra RTT | Only on cache miss |
+| App + Redis hit | 1–20 ms | Fast path |
+| App + database | 5–200+ ms | Often the main variable for dynamic pages |
+| Download HTML | Depends on size | Compression helps |
+| Parse + paint | 10–500+ ms | Device and page complexity |
+
+Open **DevTools → Network** in Chrome or Firefox: the waterfall shows which phase dominates. **Server-Timing** headers (when present) split time inside the server (DB vs rendering).
+
+<details>
+<summary><strong>Go deeper — measuring in production</strong></summary>
+
+- **Navigation Timing API** — `performance.getEntriesByType('navigation')`
+- **Server-Timing**, **trace IDs** (`X-Request-ID`, W3C `traceparent`)
+- **RUM** — Real-user monitoring aggregates LCP by country/network
+
+</details>
+
+------------------------------------------------------------------------
+
+## When Something Goes Wrong
+
+| What you see | Often means |
+|--------------|-------------|
+| DNS error / “server not found” | Wrong name, DNS outage, or offline resolver |
+| Certificate / SSL error | Expired cert, wrong hostname, corporate proxy |
+| **502 / 503** | No healthy server behind load balancer, or app overloaded |
+| Old content after deploy | CDN or browser cache not purged |
+| Slow **repeat** visits | `no-store` caching, or cold connections |
+| CORS error in console | JavaScript calling an API on another domain without permission headers |
+| Mixed content blocked | HTTPS page trying to load HTTP images/scripts |
+
+------------------------------------------------------------------------
+
+## Summary
+
+One URL triggers a **chain of caches and handoffs**:
+
+```text
+Browser cache → (optional service worker) → DNS cache →
+CDN edge → load balancer → reverse proxy →
+app cache (Redis) → database → back to your screen
+```
+
+Each layer trades **freshness** for **speed**. Learning this sequence helps you ask better questions: “Is it DNS, TLS, CDN, or the database?” when a page is slow or broken.
+
+You are not opening one socket to one machine—you are walking through a system designed for speed and scale, from the address bar to the last painted pixel.
+
+------------------------------------------------------------------------
+
+## Further Reading
+
+- [MDN: How the Web works](https://developer.mozilla.org/en-US/docs/Learn/Getting_started_with_the_web/How_the_Web_works) — Excellent beginner path
+- [High Performance Browser Networking (Ilya Grigorik)](https://hpbn.co/) — Free book when you want more depth
+- [Layer 4 Vs Layer 7 Load Balancer](/blog/layer-4-vs-layer-7-load-balancer) — On this site
+- [Browser-Enforced Security](/blog/browser-enforced-security) — CSP, CORS, same-origin policy
