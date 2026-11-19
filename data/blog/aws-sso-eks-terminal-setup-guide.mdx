@@ -1,0 +1,390 @@
+---
+title: 'AWS SSO, EKS and ECR: Terminal Setup Guide'
+date: '2026-11-19'
+lastmod: '2026-11-19'
+tags: ['aws', 'sso', 'terminal']
+draft: false
+summary: 'One Login, Every Account: A Cleaner AWS SSO, EKS and ECR Setup on macOS'
+---
+
+# Introduction
+
+At mythLabs, we used to lose a surprising amount of time to AWS logins. 
+> mythLabs is my imaginary company, by the way. I'm the founder, the platform team, and the person who still asks which account they're in. HR has never approved a headcount, mostly because HR is also me. Everyone had a slightly different setup, `aws configure sso` prompted us for a role every time, and "which account am I in?" was a question we asked far too often. So we standardized one terminal setup that anyone can build in about 15 minutes.
+
+This post walks through it. It targets macOS with zsh, and every account ID, URL and name below is a placeholder to swap for your own.
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+---
+
+## What changes
+
+| Before | After |
+|---|---|
+| `aws configure sso`, then pick account and role every time | One `aws sso login`, one browser approval for all accounts and roles |
+| Retyping `export AWS_PROFILE=...` | `assume` with a fuzzy picker, or `assume <profile>` |
+| Editing kubeconfig or re-running `update-kubeconfig` | `kubectx dev-readonly` |
+| `aws sts get-caller-identity` and hoping | AWS profile and Kubernetes context always visible in the prompt |
+| Easy to run a command in the wrong account | Production shows in red, and the workflow starts read-only |
+| Looking up the ECR login command | `ecr-login staging-admin 222222222222` |
+| Onboarding by verbal walkthrough | One document, one config file, the same result for everyone |
+
+---
+
+## The design choices
+
+- **One SSO session shared by all profiles.** One browser login covers every account and role. Without a shared session, each profile needs its own login.
+- **One profile per account and role, written into `~/.aws/config`.** The account ID and role are pre-filled, so nothing asks you to pick a role. The prompt in `aws configure sso` only appears when a profile is created, not when it's used.
+- **[Granted](https://docs.commonfate.io/granted/introduction) (`assume`) instead of `export AWS_PROFILE`.** It sets credentials for the current tab only, so different tabs can use different profiles. It also gives you a searchable picker.
+- **The profile is stored inside each kubeconfig context (`--profile`).** `kubectl` uses the right account and role whatever `AWS_PROFILE` your shell has.
+- **A separate user per context (`--user-alias`).** Without it, the admin and read-only contexts share one user entry, and the second command silently overwrites the first.
+- **The prompt shows AWS profile and Kubernetes context.** Production is red.
+- **No `AWS_PROFILE` in `~/.zshrc`.** A hidden default profile is how commands end up in the wrong account.
+- **Temporary SSO credentials only.** Nobody keeps access keys on a laptop, so there's nothing long-lived to leak or rotate.
+
+---
+
+## The example environment
+
+Our imaginary setup has three accounts and three EKS clusters, all in `us-east-1`.
+
+| Profile | Account | Account ID | Role |
+|---|---|---|---|
+| `staging-admin` | mythLabs Staging | 222222222222 | AdministratorAccess |
+| `staging-readonly-debug` | mythLabs Staging | 222222222222 | MythReadOnlyDebug |
+| `production-admin` | mythLabs Production | 333333333333 | AdministratorAccess |
+| `production-readonly-debug` | mythLabs Production | 333333333333 | MythReadOnlyDebug |
+
+| Cluster | Account | Admin context | Read-only context |
+|---|---|---|---|
+| `mythlabs-dev` | Staging | `dev-admin` | `dev-readonly` |
+| `mythlabs-qa` | Staging | `qa-admin` | `qa-readonly` |
+| `mythlabs-prod` | Production | `prod-admin` | `prod-readonly` |
+
+You can only use profiles for roles assigned to your user. If a profile fails with an access error, ask your AWS admin for that permission set.
+
+> "Read-only" is only as read-only as the permissions behind it. Make sure your read-only role maps to read-only RBAC inside each cluster, otherwise the safety net has a hole in it.
+
+---
+
+## Step 0: Clean up an old setup (skip on a fresh machine)
+
+Back up first, then remove the old config and cached logins:
+
+```bash
+cp -r ~/.aws ~/.aws-backup-$(date +%Y%m%d) 2>/dev/null
+cp ~/.kube/config ~/.kube/config.bak 2>/dev/null
+
+rm -f ~/.aws/config
+rm -rf ~/.aws/sso/cache ~/.aws/cli/cache
+```
+
+Leave `~/.aws/credentials` alone if it has static keys you still need. Delete the backup once the new setup works, since it may contain those keys.
+
+Then remove any `export AWS_PROFILE=...` line from `~/.zshrc`:
+
+```bash
+grep -n "AWS_" ~/.zshrc
+unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+```
+
+---
+
+## Step 1: Install the tools
+
+```bash:install
+brew tap fwdcloudsec/granted
+brew install fwdcloudsec/granted/granted awscli kubectl kubectx kube-ps1
+```
+
+- **granted** provides `assume`, the profile switcher
+- **awscli** is the AWS command line
+- **kubectl** is the Kubernetes command line
+- **kubectx** gives interactive context switching (and installs `kubens`)
+- **kube-ps1** shows the current Kubernetes context in your prompt
+
+Check the install:
+
+```bash
+for c in aws granted kubectl kubectx; do
+  type $c >/dev/null 2>&1 && echo "OK      $c" || echo "MISSING $c"
+done
+```
+
+---
+
+## Step 2: Create the AWS config
+
+One file defines a single SSO session and all six profiles. Replace the start URL and account IDs with yours:
+
+```bash:~/.aws/config
+mkdir -p ~/.aws
+cat > ~/.aws/config << 'EOF'
+[sso-session mythlabs]
+sso_start_url = https://your-org.awsapps.com/start
+sso_region = us-east-1
+sso_registration_scopes = sso:account:access
+
+# ---------- mythLabs Staging (222222222222) ----------
+[profile staging-admin]
+sso_session = mythlabs
+sso_account_id = 222222222222
+sso_role_name = AdministratorAccess
+region = us-east-1
+
+[profile staging-readonly-debug]
+sso_session = mythlabs
+sso_account_id = 222222222222
+sso_role_name = MythReadOnlyDebug
+region = us-east-1
+
+# ---------- mythLabs Production (333333333333) ----------
+[profile production-admin]
+sso_session = mythlabs
+sso_account_id = 333333333333
+sso_role_name = AdministratorAccess
+region = us-east-1
+
+[profile production-readonly-debug]
+sso_session = mythlabs
+sso_account_id = 333333333333
+sso_role_name = MythReadOnlyDebug
+region = us-east-1
+EOF
+```
+
+Verify that all six profiles loaded:
+
+```bash
+aws configure list-profiles
+```
+
+---
+
+## Step 3: Enable `assume`
+
+Run Granted once so it can add its shell alias:
+
+```bash
+granted
+```
+
+Choose zsh when asked, then reload your shell with `source ~/.zshrc`. If `assume` still isn't found, add the alias manually:
+
+```bash
+echo 'alias assume="source assume"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+> `assume` must be used through the alias. Running the binary directly won't set credentials in your terminal.
+
+---
+
+## Step 4: Log in and test
+
+```bash
+aws sso login --sso-session mythlabs
+```
+
+Your browser opens. Approve the request once, and it covers all six profiles. Then:
+
+```bash
+assume staging-readonly-debug
+aws sts get-caller-identity
+```
+
+The output should show account `222222222222`. Run `assume` with no argument for an interactive picker.
+
+---
+
+## Step 5: Add the EKS contexts
+
+Each cluster gets one context per role. The `--profile` flag stores the profile in the kubeconfig, and `--user-alias` keeps the admin and read-only users separate:
+
+```bash:kubeconfig
+# mythlabs-dev (staging account)
+aws eks update-kubeconfig --name mythlabs-dev --region us-east-1 \
+  --profile staging-admin --alias dev-admin --user-alias dev-admin
+aws eks update-kubeconfig --name mythlabs-dev --region us-east-1 \
+  --profile staging-readonly-debug --alias dev-readonly --user-alias dev-readonly
+
+# mythlabs-qa (staging account)
+aws eks update-kubeconfig --name mythlabs-qa --region us-east-1 \
+  --profile staging-admin --alias qa-admin --user-alias qa-admin
+aws eks update-kubeconfig --name mythlabs-qa --region us-east-1 \
+  --profile staging-readonly-debug --alias qa-readonly --user-alias qa-readonly
+
+# mythlabs-prod (production account)
+aws eks update-kubeconfig --name mythlabs-prod --region us-east-1 \
+  --profile production-admin --alias prod-admin --user-alias prod-admin
+aws eks update-kubeconfig --name mythlabs-prod --region us-east-1 \
+  --profile production-readonly-debug --alias prod-readonly --user-alias prod-readonly
+```
+
+Check the result with `kubectl config get-contexts`. You should see six contexts, each with its own `AUTHINFO` entry. Then test each read-only context:
+
+```bash
+kubectx dev-readonly  && kubectl get nodes
+kubectx qa-readonly   && kubectl get nodes
+kubectx prod-readonly && kubectl get nodes
+```
+
+Older setups leave contexts named with full ARNs. Remove them with `kubectl config delete-context <name>`.
+
+---
+
+## Step 6: Put the AWS profile and Kubernetes context in your prompt
+
+Two independent indicators matter here. kube-ps1 shows the Kubernetes context, such as `(⎈|prod-readonly:N/A)`. A small function shows the AWS profile, such as `(aws:production-readonly-debug)`. The AWS segment reflects what `aws` commands use, while `kubectl` uses the profile stored in its context. Check both before doing anything risky.
+
+If you don't already load kube-ps1, add this to the bottom of `~/.zshrc`. Putting it last stops themes and plugins from overwriting the prompt:
+
+```bash:~/.zshrc
+cat >> ~/.zshrc << 'EOF'
+
+# ---- Kubernetes context in prompt (kube-ps1) ----
+source "$(brew --prefix)/opt/kube-ps1/share/kube-ps1.sh"
+PROMPT='$(kube_ps1) '"$PROMPT"
+EOF
+```
+
+Then add the AWS segment. Production turns red, other admin profiles turn yellow, and everything else is green:
+
+```bash:~/.zshrc
+cat >> ~/.zshrc << 'EOF'
+
+# ---- AWS profile in prompt ----
+setopt PROMPT_SUBST
+aws_prompt_info() {
+  [[ -z "$AWS_PROFILE" ]] && return
+  local color="green"
+  [[ "$AWS_PROFILE" == *prod* ]] && color="red"
+  [[ "$AWS_PROFILE" == *admin* && "$AWS_PROFILE" != *prod* ]] && color="yellow"
+  echo "%F{$color}(aws:${AWS_PROFILE})%f "
+}
+[[ "$PROMPT" != *aws_prompt_info* ]] && PROMPT='$(aws_prompt_info)'"$PROMPT"
+EOF
+source ~/.zshrc
+```
+
+> These blocks append to your file, so don't run them twice.
+
+To clear the AWS segment in the current tab:
+
+```bash
+unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+```
+
+---
+
+## Step 7: ECR login for push and pull
+
+ECR uses a temporary token from your AWS profile. It works for push and pull, lasts 12 hours, and requires Docker to be running. Add this helper to `~/.zshrc`:
+
+```bash:~/.zshrc
+cat >> ~/.zshrc << 'EOF'
+
+ecr-login() {
+  local profile="$1" account="$2" region="${3:-us-east-1}"
+  [[ -z "$profile" || -z "$account" ]] && { echo "usage: ecr-login <profile> <account-id> [region]"; return 1; }
+  aws ecr get-login-password --region "$region" --profile "$profile" \
+    | docker login --username AWS --password-stdin "$account.dkr.ecr.$region.amazonaws.com"
+}
+EOF
+source ~/.zshrc
+```
+
+Use the profile for the account that owns the registry:
+
+```bash:ecr
+ecr-login staging-admin 222222222222
+docker pull 222222222222.dkr.ecr.us-east-1.amazonaws.com/<repo>:<tag>
+docker tag myapp:latest 222222222222.dkr.ecr.us-east-1.amazonaws.com/<repo>:<tag>
+docker push 222222222222.dkr.ecr.us-east-1.amazonaws.com/<repo>:<tag>
+```
+
+Pulling needs `ecr:GetAuthorizationToken` plus read access on the repo. Pushing needs write access.
+
+---
+
+## Daily workflow
+
+```bash:daily
+aws sso login --sso-session mythlabs   # only when the session has expired
+assume staging-readonly-debug          # AWS account and role, for aws commands
+kubectx dev-readonly                   # cluster and role, for kubectl
+
+aws s3 ls
+kubectl get pods -A
+```
+
+You don't need to memorize names. Run `assume` or `kubectx` with no argument, type to filter (typing `prod` leaves only production profiles), and press Enter.
+
+---
+
+### Flow 1: Build an image, push it, deploy to dev
+
+```bash:deploy
+assume staging-admin
+ecr-login staging-admin 222222222222
+
+docker build -t myapp:1.2.3 .
+docker tag myapp:1.2.3 222222222222.dkr.ecr.us-east-1.amazonaws.com/<repo>:1.2.3
+docker push 222222222222.dkr.ecr.us-east-1.amazonaws.com/<repo>:1.2.3
+
+kubectx dev-admin
+kubectl set image deploy/<name> <container>=222222222222.dkr.ecr.us-east-1.amazonaws.com/<repo>:1.2.3 -n <namespace>
+kubectl rollout status deploy/<name> -n <namespace>
+
+kubectx dev-readonly   # back to safe mode
+```
+
+---
+
+### Flow 2: Working in two tabs
+
+`assume` only affects the tab where you ran it, so each tab can use a different AWS profile. The Kubernetes context is different: it lives in `~/.kube/config` and is shared by every tab. If you run `kubectx prod-admin` in one tab, `kubectl` in your other tabs now points at production too. Check the prompt before every command, or use a one-off override:
+
+```bash
+kubectl --context prod-readonly get pods
+```
+
+---
+
+### Flow 3: Your session expires mid-work
+
+You'll see `Token has expired` or `The SSO session associated with this profile has expired`.
+
+```bash
+aws sso login --sso-session mythlabs
+```
+
+Then retry. `kubectl` picks up fresh credentials automatically because the profile is stored in the context. For `aws` commands in a tab where you already ran `assume`, the exported temporary credentials can expire separately, so if `aws` still fails, re-run `assume <profile>`.
+
+---
+
+## Cheat sheet
+
+| Task | Command |
+|---|---|
+| SSO login | `aws sso login --sso-session mythlabs` |
+| Pick profile | `assume` or `assume production-readonly-debug` |
+| Check who you are | `aws sts get-caller-identity` |
+| List contexts | `kubectl config get-contexts` |
+| Switch context | `kubectx` or `kubectx prod-readonly` |
+| Show current context | `kubectx -c` |
+| Switch namespace | `kubens` |
+| ECR login | `ecr-login staging-admin 222222222222` |
+
+---
+
+## Extending it
+
+For a new role or account, add a profile block to `~/.aws/config` with the same `sso_session`, the 12-digit `sso_account_id` and the exact permission set name as `sso_role_name`. For a new cluster, run `aws eks update-kubeconfig` once per role with `--profile`, `--alias` and `--user-alias`.
+
+That's the whole setup. Fewer logins, faster switching, and a prompt that tells you where you are before you hit Enter.
+
+---
+
+<strong>Thanks for reading!</strong>
